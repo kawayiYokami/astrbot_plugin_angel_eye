@@ -1,72 +1,100 @@
 """
-Angel Eye 插件 - 二次筛选角色 (Filter)
+Angel Eye 插件 - 筛选器角色 (Filter)
+负责从多个搜索结果中选择最匹配上下文的词条。
 """
 import json
 from typing import List, Dict, Optional
 from pathlib import Path
 
-from astrbot.api.provider import Provider
-from astrbot.core.utils.io import read_file
-from astrbot.core import logger
+from core.log import get_logger
 
-from ...models.results import FilterResult
+logger = get_logger(__name__) # 获取 logger 实例
+
 
 class Filter:
     """
-    二次筛选角色，负责从搜索返回的词条列表中选择最相关的一个。
+    筛选器角色，负责从多个搜索结果中选择最匹配上下文的词条。
     """
-    def __init__(self, provider: Provider):
+    def __init__(self, provider: 'Provider'): # 使用字符串注解
         self.provider = provider
         prompt_path = Path(__file__).parent.parent / "prompts" / "filter_prompt.md"
-        self.prompt_template = read_file(str(prompt_path))
+        self.prompt_template = prompt_path.read_text(encoding="utf-8")
 
-    def _format_search_results(self, search_results: List[Dict]) -> str:
+    def _format_dialogue(self, contexts: List[Dict], current_prompt: str) -> str:
         """
-        将搜索结果格式化为字符串。
+        将对话历史和当前问题格式化为单个字符串，供模型分析。
         """
-        if not search_results:
-            return "无搜索结果。"
+        dialogue_parts = []
+        for item in contexts:
+            # AstrBot 的上下文通常是 {'role': 'user'/'assistant', 'content': '...'}
+            role = item.get("role", "unknown").capitalize()
+            content = item.get("content", "")
+            dialogue_parts.append(f"{role}: {content}")
 
-        return "\n".join([f"- {item.get('title', '无标题')}" for item in search_results])
+        dialogue_parts.append(f"User: {current_prompt}")
+        return "\n".join(dialogue_parts)
 
-    async def select_best_entry(self, search_results: List[Dict], original_prompt: str) -> Optional[str]:
+    def _format_candidate_list(self, candidate_list: List[Dict]) -> str:
         """
-        调用小模型分析并选择最佳词条。
+        将候选词条列表格式化为字符串。
+        """
+        if not candidate_list:
+            return "无候选词条。"
+
+        return "\n".join([f"- {item.get('title', '无标题')}" for item in candidate_list])
+
+    async def select_best_entry(self, contexts: List[Dict], current_prompt: str, entity_name: str, candidate_list: List[Dict]) -> Optional[str]:
+        """
+        调用分析模型，从候选词条中选择最匹配上下文的一个。
 
         Args:
-            search_results (List[Dict]): 搜索客户端返回的词条列表。
-            original_prompt (str): 用户的原始问题。
+            contexts (List[Dict]): 对话历史记录。
+            current_prompt (str): 用户当前的输入。
+            entity_name (str): 目标实体的名称。
+            candidate_list (List[Dict]): 搜索客户端返回的候选词条列表。
 
         Returns:
             Optional[str]: 被选中的词条标题，如果分析失败或无相关词条则返回 None。
         """
         if not self.provider:
-            logger.error("AngelEye[Filter]: 小模型Provider未初始化。")
+            logger.error("AngelEye[Filter]: 分析模型Provider未初始化。")
             return None
 
-        formatted_results = self._format_search_results(search_results)
+        formatted_dialogue = self._format_dialogue(contexts, current_prompt)
+        formatted_candidates = self._format_candidate_list(candidate_list)
+
         final_prompt = self.prompt_template.format(
-            original_prompt=original_prompt,
-            search_results=formatted_results
+            dialogue=formatted_dialogue,
+            entity_name=entity_name,
+            candidate_list=formatted_candidates
         )
 
         try:
             response = await self.provider.text_chat(prompt=final_prompt)
+            response_text = response.completion_text
 
-            json_str_match = response.completion_text[response.completion_text.find('{'):response.completion_text.rfind('}')+1]
-            if not json_str_match:
-                logger.warning(f"AngelEye[Filter]: 小模型未返回有效的JSON。原始返回: {response.completion_text}")
+            # 从返回的文本中提取 JSON
+            json_str_start = response_text.find('{')
+            json_str_end = response_text.rfind('}') + 1
+            if json_str_start == -1 or json_str_end <= json_str_start:
+                logger.warning(f"AngelEye[Filter]: 模型未返回有效的JSON结构。原始返回: {response_text}")
                 return None
 
-            response_json = json.loads(json_str_match)
+            json_str = response_text[json_str_start:json_str_end]
+            response_json = json.loads(json_str)
 
-            result = FilterResult(**response_json)
-            logger.debug(f"AngelEye[Filter]: 分析结果: {result.selected_title}")
-            return result.selected_title
+            selected_title = response_json.get("selected_title")
+
+            if selected_title:
+                logger.debug(f"AngelEye[Filter]: 为实体 '{entity_name}' 选择的最佳词条是: '{selected_title}'")
+            else:
+                logger.info(f"AngelEye[Filter]: 为实体 '{entity_name}' 未找到匹配的词条。")
+
+            return selected_title
 
         except json.JSONDecodeError as e:
-            logger.error(f"AngelEye[Filter]: 解析小模型返回的JSON失败: {e}。原始返回: {response.completion_text}")
+            logger.error(f"AngelEye[Filter]: 解析模型返回的JSON失败: {e}。原始返回: {response_text}")
             return None
         except Exception as e:
-            logger.error(f"AngelEye[Filter]: 调用小模型时发生未知错误: {e}", exc_info=True)
+            logger.error(f"AngelEye[Filter]: 调用分析模型时发生未知错误: {e}", exc_info=True)
             return None
