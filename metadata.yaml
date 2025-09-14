@@ -1,4 +1,8 @@
-name: 萌娘百科搜索服务
-description: "提供一个可供内部调用的萌娘百科搜索服务，不包含用户指令。"
+id: astrbot_plugin_angel_eye
+name: Angel Eye
 author: YourName
 version: 0.1.0
+description: 在调用大模型之前，通过小模型搜索百科知识，为大模型补充上下文。
+requirements:
+  - httpx
+  - beautifulsoup4

@@ -1,2 +1,2 @@
-# Core dependencies
-mwparserfromhell>=0.6.0
+httpx
+beautifulsoup4
