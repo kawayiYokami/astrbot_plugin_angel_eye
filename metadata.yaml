@@ -1,0 +1,4 @@
+name: 萌娘百科搜索服务
+description: "提供一个可供内部调用的萌娘百科搜索服务，不包含用户指令。"
+author: YourName
+version: 0.1.0
