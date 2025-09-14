@@ -1,0 +1,38 @@
+{
+  "analyzer_provider_id": {
+    "type": "string",
+    "title": "分析模型 Provider ID",
+    "description": "用于实体分析和信息摘要的轻量级模型 Provider ID。请确保此模型已在 AstrBot 中正确配置。",
+    "default": "claude-3-haiku"
+  },
+  "max_context_length": {
+    "type": "int",
+    "title": "最大上下文长度",
+    "description": "传递给分析模型进行上下文理解的最大字符长度。过长的上下文可能影响分析效率。",
+    "default": 2000
+  },
+  "domain_acg_enabled": {
+    "type": "bool",
+    "title": "启用 ACG 领域",
+    "description": "是否启用二次元/ACG领域的处理。",
+    "default": true
+  },
+  "domain_acg_client": {
+    "type": "string",
+    "title": "ACG 领域客户端",
+    "description": "用于ACG领域的百科客户端名称 (例如 'moegirl')。",
+    "default": "moegirl"
+  },
+  "domain_general_enabled": {
+    "type": "bool",
+    "title": "启用通用领域",
+    "description": "是否启用通用知识领域的处理。",
+    "default": true
+  },
+  "domain_general_client": {
+    "type": "string",
+    "title": "通用领域客户端",
+    "description": "用于通用领域的百科客户端名称 (例如 'general')。",
+    "default": "general"
+  }
+}

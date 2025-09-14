@@ -4,14 +4,13 @@ Angel Eye 插件主入口
 import astrbot.api.star as star
 import astrbot.api.event.filter as filter
 from astrbot.api.event import AstrMessageEvent
-from astrbot.api.provider import ProviderRequest
-from astrbot.core import logger
+from astrbot.api.provider import ProviderRequest, Provider
 
-from .roles.retriever import Retriever
-from .roles.filter import Filter
-from .roles.summarizer import Summarizer
-from .clients.moegirl_client import MoegirlClient
-from .clients.general_client import GeneralClient
+from core.log import get_logger
+from roles.retriever import Retriever
+
+logger = get_logger(__name__)
+
 
 class AngelEyePlugin(star.Star):
     """
@@ -19,73 +18,53 @@ class AngelEyePlugin(star.Star):
     """
     def __init__(self, context: star.Context) -> None:
         self.context = context
-        # 假设在 astrbot.yml 中配置了名为 'small_model' 的 Provider
-        try:
-            small_model_provider = self.context.get_provider_by_id('small_model')
-        except Exception:
-            logger.error("AngelEye: 未能在配置中找到 'small_model' Provider，插件可能无法正常工作。")
-            small_model_provider = None
+        # 1. 加载配置
+        self.config = self.context.get_config("astrbot_plugin_angel_eye")
+        logger.info(f"AngelEye: 加载配置完成: {self.config}")
 
-        # 初始化所有角色和客户端
-        self.retriever = Retriever(small_model_provider)
-        self.filter = Filter(small_model_provider)
-        self.summarizer = Summarizer(small_model_provider)
+        # 2. 获取分析模型 Provider
+        analyzer_provider_id = self.config.get("analyzer_provider_id", "claude-3-haiku")
+        try:
+            self.analyzer_provider: Provider = self.context.get_provider_by_id(analyzer_provider_id)
+        except Exception as e:
+            logger.error(f"AngelEye: 未能在配置中找到分析模型 Provider ID '{analyzer_provider_id}'，插件可能无法正常工作。错误: {e}")
+            self.analyzer_provider = None
+
+        # 3. 初始化所有角色和客户端
+        # 注意：Classifier 将在 Retriever 内部被初始化和使用
+        self.retriever = Retriever(self.analyzer_provider, self.config)
+        # Filter 角色在新架构中被整合或移除，由 Classifier 和直接的标题匹配替代
+        # Summarizer 角色保留
+        self.summarizer = Summarizer(self.analyzer_provider)
+        # Clients 保留
         self.moegirl_client = MoegirlClient()
         self.general_client = GeneralClient()
 
     @filter.on_llm_request(priority=100)
-    async def run_knowledge_injection_pipeline(self, event: AstrMessageEvent, req: ProviderRequest):
+    async def enrich_context_before_llm_call(self, event: AstrMessageEvent, req: ProviderRequest):
         """
-        在主模型请求前，执行知识注入流水线。
+        在主模型请求前，执行上下文增强逻辑。
+        这是 Angel Eye 的核心入口点。
         """
-        logger.info("AngelEye: 知识注入流水线启动...")
+        if not self.analyzer_provider:
+            logger.warning("AngelEye: 分析模型未配置，跳过上下文增强。")
+            return
+
+        logger.info("AngelEye: 上下文增强流程启动...")
         original_prompt = req.prompt
 
-        # 1. 检索员角色：判断是否需要搜索
-        retriever_result = await self.retriever.analyze(req.contexts, original_prompt)
-        if not retriever_result or not retriever_result.should_search:
-            logger.info("AngelEye: 检索员决策不搜索，流水线结束。")
+        # 1. 调用 Retriever，它将协调 Classifier, Clients 和 Summarizer 完成整个流程
+        #    返回一个包含所有需要注入的背景知识的字符串
+        background_knowledge = await self.retriever.process_context(req.contexts, original_prompt)
+
+        if not background_knowledge:
+            logger.info("AngelEye: 未发现需要补充的背景知识，流程结束。")
             return
 
-        # 2. 搜索调度
-        logger.info(f"AngelEye: 检索员决策搜索。领域: {retriever_result.domain}, 查询: {retriever_result.search_query}")
-        search_results = []
-        if retriever_result.domain == "二次元":
-            search_results = await self.moegirl_client.search(retriever_result.search_query)
-        else:  # 通用
-            search_results = await self.general_client.search(retriever_result.search_query)
-
-        if not search_results:
-            logger.info("AngelEye: 百科搜索无结果，流水线结束。")
-            return
-
-        # 3. 二次筛选角色：从结果中选择最相关的词条
-        selected_title = await self.filter.select_best_entry(search_results, original_prompt)
-        if not selected_title:
-            logger.info("AngelEye: 二次筛选无结果，流水线结束。")
-            return
-
-        # 4. 获取全文并交由整理员处理
-        logger.info(f"AngelEye: 筛选出的最佳词条: {selected_title}")
-        full_content = ""
-        if retriever_result.domain == "二次元":
-            full_content = await self.moegirl_client.get_page_content(selected_title)
-        else:
-            full_content = await self.general_client.get_page_content(selected_title)
-
-        if not full_content:
-            logger.info("AngelEye: 获取页面全文失败，流水线结束。")
-            return
-
-        summary_text = await self.summarizer.summarize(full_content, original_prompt)
-        if not summary_text:
-            logger.info("AngelEye: 整理员未能生成摘要，流水线结束。")
-            return
-
-        # 5. 安全上下文注入
-        injection_text = f"\n\n[补充知识]:\n---\n{summary_text}\n---\n"
-        req.system_prompt += injection_text
-        logger.info("AngelEye: 成功注入补充知识！")
+        # 2. 安全上下文注入
+        injection_text = f"\n\n[背景知识]:\n{background_knowledge}\n"
+        req.system_prompt = (req.system_prompt or "") + injection_text
+        logger.info("AngelEye: 成功注入背景知识！")
 
         # (可选) 修改 prompt，引导主模型使用补充知识
-        req.prompt = f"请参考系统提示词中提供的'补充知识'，来回答我最初的问题：'{original_prompt}'"
+        # req.prompt = f"请参考系统提示词中提供的'背景知识'，来回答我最初的问题：'{original_prompt}'"

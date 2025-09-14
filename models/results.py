@@ -20,3 +20,10 @@ class FilterResult:
     二次筛选角色的分析结果。
     """
     selected_title: Optional[str] = None
+
+@dataclass
+class SummaryResult:
+    """
+    整理员角色的分析结果。
+    """
+    summary_text: Optional[str] = None
