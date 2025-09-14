@@ -1,0 +1,2 @@
+# Core dependencies
+mwparserfromhell>=0.6.0
