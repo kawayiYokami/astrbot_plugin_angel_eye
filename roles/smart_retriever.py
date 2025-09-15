@@ -15,7 +15,7 @@ from ..clients.wikidata_client import WikidataClient
 from .filter import Filter
 from .summarizer import Summarizer
 from ..core.wikitext_cleaner import clean as clean_wikitext
-from ..core.cache_manager import get_knowledge, set_knowledge, build_doc_key, build_fact_key
+from ..core.cache_manager import get_knowledge, set_knowledge, build_doc_key, build_fact_key, build_search_key
 
 logger = get_logger(__name__)
 
@@ -51,7 +51,15 @@ class SmartRetriever:
         self.filter: Filter | None = None
         self.summarizer: Summarizer | None = None
 
-    async def retrieve(self, request: KnowledgeRequest) -> KnowledgeResult:
+    def normalize_string(self, s: str) -> str:
+        """
+        规范化字符串，用于健壮的标题匹配。
+        """
+        # 示例实现：转小写、去首尾空格
+        # 可根据需要添加更多规则，如全角/半角转换、移除特殊符号等
+        return s.lower().strip()
+
+    async def retrieve(self, request: KnowledgeRequest, dialogue: str) -> KnowledgeResult:
         # 即时初始化子角色
         if self.filter is None:
             self.filter = Filter(self.analyzer_provider)
@@ -62,6 +70,7 @@ class SmartRetriever:
         核心方法：根据知识请求执行智能检索
 
         :param request: 知识请求对象
+        :param dialogue: 格式化后的对话历史
         :return: 知识结果对象
         """
         result = KnowledgeResult()
@@ -92,7 +101,7 @@ class SmartRetriever:
                     logger.info(f"AngelEye[SmartRetriever]: Wikipedia未启用，跳过对 '{entity_name}' 的查询")
                     continue
 
-                doc_chunk = await self._process_document(entity_name, source)
+                doc_chunk = await self._process_document(entity_name, source, dialogue)
                 if doc_chunk:
                     result.chunks.append(doc_chunk)
 
@@ -180,30 +189,150 @@ class SmartRetriever:
 
         return chunks
 
-    async def _process_document(self, entity_name: str, source: str) -> Optional[KnowledgeChunk]:
+    async def _process_document(self, entity_name: str, source: str, dialogue: str) -> Optional[KnowledgeChunk]:
         """
         处理单个文档请求，实现动态执行策略
 
         :param entity_name: 实体名称
         :param source: 数据源 ("wikipedia" 或 "moegirl")
+        :param dialogue: 格式化后的对话历史
         :return: 知识片段，如果未找到则返回None
         """
-        # 1. 构建缓存键
-        cache_key = build_doc_key(source, entity_name)
+        # 1. 检查搜索结果列表的缓存
+        search_cache_key = build_search_key(source, entity_name)
+        cached_search_results = get_knowledge(search_cache_key)
 
-        # 2. 检查缓存
+        if cached_search_results:
+            logger.info(f"AngelEye[Cache]: 命中搜索结果缓存 (Key: {search_cache_key})")
+            search_results = cached_search_results
+        else:
+            logger.info(f"AngelEye[Cache]: 搜索结果缓存未命中，执行网络搜索...")
+            # 选择对应的客户端
+            client = self._get_client(source)
+            if not client:
+                logger.warning(f"AngelEye[SmartRetriever]: 不支持的数据源 '{source}'")
+                return None
+
+            # 执行搜索
+            logger.info(f"AngelEye[SmartRetriever]: 在 {source} 搜索 '{entity_name}'")
+            search_results = await client.search(entity_name, limit=self.max_search_results)
+            if search_results:
+                logger.info(f"AngelEye[Cache]: 将新搜索结果存入缓存 (Key: {search_cache_key})")
+                set_knowledge(search_cache_key, search_results) # 缓存整个列表
+
+        if not search_results:
+            logger.info(f"AngelEye[SmartRetriever]: '{entity_name}' 在 {source} 中无搜索结果")
+            return None
+
+        # 2. 实现智能决策点 (完全匹配 / Filter)
+        selected_entry = None
+        selected_pageid = None
+
+        # Case A: 检查是否有完全匹配
+        for result in search_results:
+            if self.normalize_string(result.get("title", "")) == self.normalize_string(entity_name):
+                selected_entry = result["title"]
+                selected_pageid = result.get("pageid")
+                logger.info(f"AngelEye[SmartRetriever]: 找到完全匹配 '{selected_entry}'")
+                break
+
+        # Case B: 模糊匹配，调用Filter
+        if not selected_entry and len(search_results) > 0:
+            logger.info(f"AngelEye[SmartRetriever]: 无完全匹配，调用Filter从 {len(search_results)} 个结果中筛选")
+
+            # 构造候选列表供Filter使用
+            candidate_list = [
+                {
+                    "title": r["title"],
+                    "snippet": r.get("snippet", ""),
+                    "url": r.get("url", "")
+                }
+                for r in search_results
+            ]
+
+            # 调用Filter进行筛选
+            # 注意：此处暂时不传递 dialogue，因为 Filter 的 Prompt 可能需要不同的上下文
+            # 如果未来需要，可以修改 Filter 的接口
+            selected_title = await self.filter.select_best_entry(
+                contexts=[],  # 如果有对话上下文，传入这里
+                current_prompt="",  # 当前用户输入
+                entity_name=entity_name,
+                candidate_list=candidate_list
+            )
+
+            if selected_title:
+                # 找到对应的pageid
+                for result in search_results:
+                    if result["title"] == selected_title:
+                        selected_entry = selected_title
+                        selected_pageid = result.get("pageid")
+                        logger.info(f"AngelEye[SmartRetriever]: Filter选择了 '{selected_entry}'")
+                        break
+
+        # Case C: 无匹配
+        if not selected_entry:
+            logger.info(f"AngelEye[SmartRetriever]: '{entity_name}' 无相关词条，遵循宁缺毋滥原则")
+            return None
+
+        # 3. 检查原始页面内容的缓存
+        cache_key = build_doc_key(source, selected_entry)
         cached_content = get_knowledge(cache_key)
+
         if cached_content:
-            logger.info(f"AngelEye[Cache]: 命中缓存 (Key: {cache_key})")
-            # 从缓存直接构建 KnowledgeChunk 并返回
+            logger.info(f"AngelEye[Cache]: 命中原始页面缓存 (Key: {cache_key})")
+            full_content = cached_content
+        else:
+            logger.info(f"AngelEye[Cache]: 原始页面缓存未命中，开始网络请求...")
+            # 选择对应的客户端 (如果之前没有选择过)
+            if 'client' not in locals():
+                client = self._get_client(source)
+                if not client:
+                    logger.warning(f"AngelEye[SmartRetriever]: 不支持的数据源 '{source}'")
+                    return None
+
+            # 获取选中词条的全文
+            logger.info(f"AngelEye[SmartRetriever]: 获取 '{selected_entry}' 的全文内容")
+            full_content = await client.get_page_content(selected_entry, pageid=selected_pageid)
+            if not full_content:
+                logger.warning(f"AngelEye[SmartRetriever]: 无法获取 '{selected_entry}' 的内容")
+                return None
+
+            # 立即将原始页面内容存入缓存
+            logger.info(f"AngelEye[Cache]: 将新获取的原始页面存入缓存 (Key: {cache_key})")
+            set_knowledge(cache_key, full_content)
+
+        # 4. 清理wikitext
+        cleaned_content = clean_wikitext(full_content)
+        content_length = len(cleaned_content)
+        logger.info(f"AngelEye[SmartRetriever]: 获取到 {content_length} 字符的内容")
+
+        # 5. 根据文本长度决定处理方式 (这部分是本地处理，不缓存)
+        final_content = None
+        if content_length <= self.TEXT_LENGTH_THRESHOLD:
+            # 文本较短，直接返回
+            logger.info(f"AngelEye[SmartRetriever]: 内容长度 {content_length} <= {self.TEXT_LENGTH_THRESHOLD}，直接使用原文")
+            final_content = cleaned_content
+        else:
+            # 文本较长，调用Summarizer进行归纳
+            logger.info(f"AngelEye[SmartRetriever]: 内容长度 {content_length} > {self.TEXT_LENGTH_THRESHOLD}，调用AI归纳")
+            summary = await self.summarizer.summarize(cleaned_content, entity_name, dialogue)
+            if summary:
+                final_content = summary
+            else:
+                logger.warning(f"AngelEye[SmartRetriever]: AI归纳失败，使用截断的原文")
+                # 归纳失败时的降级策略：使用配置的阈值
+                final_content = cleaned_content[:self.TEXT_LENGTH_THRESHOLD] + "..."
+
+        # 6. 构建并返回 KnowledgeChunk
+        if final_content:
             return KnowledgeChunk(
                 source=source,
                 entity=entity_name,
-                content=cached_content,
-                source_url=None # 注意：缓存命中时，我们可能没有URL，这是可接受的
+                content=final_content,
+                source_url=search_results[0].get("url") if search_results else None
             )
 
-        logger.info(f"AngelEye[Cache]: 缓存未命中 (Key: {cache_key})，开始执行网络请求。")
+        return None
 
         # 选择对应的客户端
         client = self._get_client(source)
@@ -246,6 +375,8 @@ class SmartRetriever:
             ]
 
             # 调用Filter进行筛选
+            # 注意：此处暂时不传递 dialogue，因为 Filter 的 Prompt 可能需要不同的上下文
+            # 如果未来需要，可以修改 Filter 的接口
             selected_title = await self.filter.select_best_entry(
                 contexts=[],  # 如果有对话上下文，传入这里
                 current_prompt="",  # 当前用户输入
@@ -289,7 +420,7 @@ class SmartRetriever:
         else:
             # 文本较长，调用Summarizer进行归纳
             logger.info(f"AngelEye[SmartRetriever]: 内容长度 {content_length} > {self.TEXT_LENGTH_THRESHOLD}，调用AI归纳")
-            summary = await self.summarizer.summarize(cleaned_content, entity_name)
+            summary = await self.summarizer.summarize(cleaned_content, entity_name, dialogue)
             if summary:
                 final_content = summary
             else:

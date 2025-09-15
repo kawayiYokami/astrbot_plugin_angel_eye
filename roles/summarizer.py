@@ -5,10 +5,9 @@ Angel Eye 插件 - 摘要员角色 (Summarizer)
 from typing import Optional, Dict
 from pathlib import Path
 
-from ..core.log import get_logger, log_llm_interaction
-from ..core.validators import validate_input
-from ..core.exceptions import AngelEyeError
 
+from ..core.log import get_logger, log_llm_interaction
+from ..core.exceptions import AngelEyeError
 logger = get_logger(__name__)
 
 
@@ -36,14 +35,14 @@ class Summarizer:
             logger.error(f"AngelEye[Summarizer]: 找不到Prompt文件 {prompt_path}")
             self.prompt_template = "为实体 {entity_name} 生成摘要:\n{full_content}"
 
-    @validate_input(max_length=8000) # 增加一个合理的硬编码上限防止超长输入
-    async def summarize(self, full_content: str, entity_name: str) -> Optional[str]:
+    async def summarize(self, full_content: str, entity_name: str, dialogue: str) -> Optional[str]:
         """
         调用LLM对百科全文进行摘要，生成背景知识
         严格遵循"宁缺毋滥"原则，避免生成无关内容
 
         :param full_content: 百科页面的完整内容
         :param entity_name: 需要摘要的实体名称
+        :param dialogue: 格式化后的对话历史
         :return: 总结好的背景知识文本，如果生成失败则返回None
         """
         if not self.provider:
@@ -55,11 +54,12 @@ class Summarizer:
 
         final_prompt = self.prompt_template.format(
             entity_name=entity_name,
-            full_content=content_to_summarize
+            full_content=content_to_summarize,
+            dialogue=dialogue
         )
 
         try:
-            logger.info(f"AngelEye[Summarizer]: 正在为实体 '{entity_name}' 生成摘要...")
+            logger.debug(f"AngelEye[Summarizer]: 正在为实体 '{entity_name}' 生成摘要...")
             response = await self.provider.text_chat(prompt=final_prompt)
             summary_text = response.completion_text.strip()
 

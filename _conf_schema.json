@@ -1,4 +1,10 @@
 {
+  "persona_name": {
+    "type": "string",
+    "title": "AI 昵称",
+    "description": "为 Angel Eye 指定一个在对话中使用的专属昵称，以区别于全局唤醒词。多个昵称请用 '|' 分隔。",
+    "default": "fairy|仙灵"
+  },
   "analyzer_provider_id": {
     "type": "string",
     "title": "分析模型 Provider ID",
