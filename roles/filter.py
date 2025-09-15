@@ -79,13 +79,15 @@ class Filter:
             logger.info(f"AngelEye[Filter]: 实体 '{entity_name}' 的候选列表为空")
             return None
 
-        logger.debug(f"AngelEye[Filter]: 为实体 '{entity_name}' 从 {len(candidate_list)} 个候选中筛选")
+        logger.info(f"AngelEye[Filter]: 为实体 '{entity_name}' 从 {len(candidate_list)} 个候选中筛选")
 
         formatted_dialogue = self._format_dialogue(contexts, current_prompt)
         formatted_candidates = self._format_candidate_list(candidate_list)
 
         # 增加诊断日志，捕获传入 format 的所有变量
-        logger.debug(f"AngelEye[Filter]: Formatting prompt with: dialogue='{formatted_dialogue}', entity_name='{entity_name}', candidate_list='{formatted_candidates}'")
+        logger.info(f"AngelEye[Filter]: Formatting prompt with: dialogue='{formatted_dialogue}', entity_name='{entity_name}', candidate_list='{formatted_candidates}'")
+        # 在 format 前打印模板内容，以检查是否被污染
+        logger.info(f"AngelEye[Filter]: Current prompt template before format: {self.prompt_template}")
 
         final_prompt = self.prompt_template.format(
             dialogue=formatted_dialogue,
