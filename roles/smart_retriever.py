@@ -6,7 +6,7 @@ import json
 from typing import List, Dict, Optional, Any
 from astrbot.api.provider import Provider
 
-from ..core.log import get_logger
+from astrbot.api import logger
 from ..models.request import KnowledgeRequest
 from ..models.knowledge import KnowledgeChunk, KnowledgeResult
 from ..clients.wikipedia_client import WikipediaClient
@@ -17,7 +17,6 @@ from .summarizer import Summarizer
 from ..core.wikitext_cleaner import clean as clean_wikitext
 from ..core.cache_manager import get_knowledge, set_knowledge, build_doc_key, build_fact_key, build_search_key
 
-logger = get_logger(__name__)
 
 
 class SmartRetriever:
@@ -140,7 +139,7 @@ class SmartRetriever:
             for fact_name in fact_names:
                 fact_query = f"{entity_name}.{fact_name}"
                 cache_key = build_fact_key(fact_query)
-                cached_value = get_knowledge(cache_key)
+                cached_value = await get_knowledge(cache_key)
                 if cached_value:
                     logger.info(f"AngelEye[Cache]: 命中事实缓存 (Key: {cache_key})")
                     combined_content_lines.append(f"- {fact_name}: {cached_value}")
@@ -200,7 +199,7 @@ class SmartRetriever:
         """
         # 1. 检查搜索结果列表的缓存
         search_cache_key = build_search_key(source, entity_name)
-        cached_search_results = get_knowledge(search_cache_key)
+        cached_search_results = await get_knowledge(search_cache_key)
 
         if cached_search_results:
             logger.info(f"AngelEye[Cache]: 命中搜索结果缓存 (Key: {search_cache_key})")
@@ -276,7 +275,7 @@ class SmartRetriever:
 
         # 3. 检查原始页面内容的缓存
         cache_key = build_doc_key(source, selected_entry)
-        cached_content = get_knowledge(cache_key)
+        cached_content = await get_knowledge(cache_key)
 
         if cached_content:
             logger.info(f"AngelEye[Cache]: 命中原始页面缓存 (Key: {cache_key})")

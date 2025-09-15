@@ -5,9 +5,8 @@
 
 from typing import List, Optional, Dict
 from .base_client import BaseWikiClient
-from ..core.log import get_logger
+from astrbot.api import logger
 
-logger = get_logger(__name__)
 
 
 class WikipediaClient(BaseWikiClient):

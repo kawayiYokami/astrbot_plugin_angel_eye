@@ -7,15 +7,14 @@ import astrbot.api.event.filter as filter
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.provider import ProviderRequest, Provider
 import random
+from astrbot.core.star.star_tools import StarTools
 
-from .core.log import get_logger, setup_llm_logger
+from astrbot.api import logger
+from .core import cache_manager
 from .core.exceptions import AngelEyeError
-# 导入新的智能检索器和相关组件
 from .roles.smart_retriever import SmartRetriever
 from .roles.classifier import Classifier
 from .roles.summarizer import Summarizer
-
-logger = get_logger(__name__)
 
 
 class AngelEyePlugin(star.Star):
@@ -29,8 +28,9 @@ class AngelEyePlugin(star.Star):
         self.config = config or {}
         logger.info(f"AngelEye: 加载配置完成: {self.config}")
 
-        # 2. 初始化LLM日志记录器
-        setup_llm_logger(self.config)
+        # 初始化缓存管理器
+        data_dir = str(StarTools.get_data_dir())
+        cache_manager.init_cache(data_dir)
 
         # 3. 初始化新架构的所有角色和客户端 (此时不传入Provider)
         self.classifier = Classifier(None)

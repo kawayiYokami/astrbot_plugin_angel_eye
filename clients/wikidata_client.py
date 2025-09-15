@@ -4,9 +4,8 @@ Wikidata API客户端
 """
 import httpx
 from typing import List, Dict, Optional, Set, Any
-from ..core.log import get_logger
+from astrbot.api import logger
 
-logger = get_logger(__name__)
 
 
 class WikidataClient:
