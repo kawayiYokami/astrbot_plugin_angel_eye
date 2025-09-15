@@ -70,7 +70,7 @@ class Classifier:
 
         try:
             # 调用LLM
-            logger.info("AngelEye[Classifier]: 正在调用LLM分析对话...")
+            logger.debug("AngelEye[Classifier]: 正在调用LLM分析对话...")
             response = await self.provider.text_chat(prompt=final_prompt)
             response_text = response.completion_text
 

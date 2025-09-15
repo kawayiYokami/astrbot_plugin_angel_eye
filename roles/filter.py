@@ -49,12 +49,17 @@ class Filter:
 
     def _format_candidate_list(self, candidate_list: List[Dict]) -> str:
         """
-        将候选词条列表格式化为字符串。
+        将候选词条列表格式化为包含标题和摘要的JSON字符串。
         """
         if not candidate_list:
-            return "无候选词条。"
+            return "[]"
 
-        return "\n".join([f"- {item.get('title', '无标题')}" for item in candidate_list])
+        # 只提取 title 和 snippet 以优化上下文
+        formatted_list = [
+            {"title": item.get("title", "无标题"), "snippet": item.get("snippet", "")}
+            for item in candidate_list
+        ]
+        return json.dumps(formatted_list, ensure_ascii=False, indent=2)
 
     async def select_best_entry(self, contexts: List[Dict], current_prompt: str, entity_name: str, candidate_list: List[Dict]) -> Optional[str]:
         """
@@ -75,7 +80,7 @@ class Filter:
             logger.info(f"AngelEye[Filter]: 实体 '{entity_name}' 的候选列表为空")
             return None
 
-        logger.info(f"AngelEye[Filter]: 为实体 '{entity_name}' 从 {len(candidate_list)} 个候选中筛选")
+        logger.debug(f"AngelEye[Filter]: 为实体 '{entity_name}' 从 {len(candidate_list)} 个候选中筛选")
 
         formatted_dialogue = self._format_dialogue(contexts, current_prompt)
         formatted_candidates = self._format_candidate_list(candidate_list)

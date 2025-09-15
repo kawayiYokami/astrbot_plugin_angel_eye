@@ -43,6 +43,11 @@ def build_fact_key(fact_query: str) -> str:
     """为事实知识构建缓存键 (例如 '朱祁镇.父亲')"""
     return f"fact:{fact_query}"
 
+
+def build_search_key(source: str, entity_name: str) -> str:
+    """为搜索结果列表构建缓存键"""
+    return f"search:{source}:{entity_name}"
+
 def get_cache_stats() -> Dict[str, int]:
     """
     获取缓存统计信息

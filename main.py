@@ -6,6 +6,7 @@ import astrbot.api.star as star
 import astrbot.api.event.filter as filter
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api.provider import ProviderRequest, Provider
+import random
 
 from .core.log import get_logger, setup_llm_logger
 from .core.exceptions import AngelEyeError
@@ -67,8 +68,11 @@ class AngelEyePlugin(star.Star):
                 logger.info("AngelEye: 未发现需要补充的背景知识，流程结束")
                 return
 
+            # 1.5. 格式化对话历史，供 Summarizer 使用
+            formatted_dialogue = self.classifier._format_dialogue(req.contexts, original_prompt)
+
             # 2. 调用SmartRetriever执行智能知识检索
-            knowledge_result = await self.smart_retriever.retrieve(knowledge_request)
+            knowledge_result = await self.smart_retriever.retrieve(knowledge_request, formatted_dialogue)
 
             # 如果没有获取到任何知识，直接返回
             if not knowledge_result.chunks:
@@ -83,9 +87,19 @@ class AngelEyePlugin(star.Star):
                 return
 
             # 4. 安全上下文注入
-            injection_text = f"\n\n[背景知识]:\n{background_knowledge}\n"
+            # 从配置中读取 persona_name，如果不存在则使用默认值 'fairy|仙灵'
+            persona_names_str = self.config.get("persona_name", "fairy|仙灵")
+            # 如果包含 '|'，则随机选择一个
+            if '|' in persona_names_str:
+                persona_name = random.choice(persona_names_str.split('|')).strip()
+            else:
+                persona_name = persona_names_str
+
+            # 构建包含身份提醒和背景知识的注入文本
+            injection_text = f"\n\n---\n[系统提醒] 你的名字是 {persona_name}。请根据以下背景知识进行回复。\n\n[背景知识]:\n{background_knowledge}\n---"
+
             req.system_prompt = (req.system_prompt or "") + injection_text
-            logger.info("AngelEye: 成功注入背景知识！")
+            logger.info(f"AngelEye: 成功注入身份提醒和背景知识！(昵称: {persona_name})")
 
         except AngelEyeError as e:
             logger.error(f"AngelEye: 在上下文增强流程中发生错误: {e}", exc_info=True)
