@@ -32,11 +32,6 @@ class AngelEyePlugin(star.Star):
         data_dir = str(StarTools.get_data_dir())
         cache_manager.init_cache(data_dir)
 
-        # 3. 初始化新架构的所有角色和客户端 (此时不传入Provider)
-        self.classifier = Classifier(None)
-        self.smart_retriever = SmartRetriever(None, self.config)
-        self.summarizer = Summarizer(None, self.config)
-
     @filter.on_llm_request(priority=100)
     async def enrich_context_before_llm_call(self, event: AstrMessageEvent, req: ProviderRequest):
         """
@@ -51,17 +46,16 @@ class AngelEyePlugin(star.Star):
             logger.warning(f"AngelEye: 分析模型Provider '{analyzer_provider_id}' 未找到或未配置，跳过上下文增强")
             return
 
-        # 将获取到的 Provider 更新到角色实例中
-        self.classifier.provider = analyzer_provider
-        self.smart_retriever.analyzer_provider = analyzer_provider
-        self.summarizer.provider = analyzer_provider
+        # 在每次请求时创建新的角色实例，避免状态污染
+        classifier = Classifier(analyzer_provider)
+        smart_retriever = SmartRetriever(analyzer_provider, self.config)
 
         logger.info("AngelEye: 上下文增强流程启动...")
         original_prompt = req.prompt
 
         try:
             # 1. 调用Classifier生成轻量级知识请求指令
-            knowledge_request = await self.classifier.get_knowledge_request(req.contexts, original_prompt)
+            knowledge_request = await classifier.get_knowledge_request(req.contexts, original_prompt)
 
             # 如果没有需要查询的知识，直接返回
             if not knowledge_request:
@@ -69,10 +63,10 @@ class AngelEyePlugin(star.Star):
                 return
 
             # 1.5. 格式化对话历史，供 Summarizer 使用
-            formatted_dialogue = self.classifier._format_dialogue(req.contexts, original_prompt)
+            formatted_dialogue = classifier._format_dialogue(req.contexts, original_prompt)
 
             # 2. 调用SmartRetriever执行智能知识检索
-            knowledge_result = await self.smart_retriever.retrieve(knowledge_request, formatted_dialogue)
+            knowledge_result = await smart_retriever.retrieve(knowledge_request, formatted_dialogue)
 
             # 如果没有获取到任何知识，直接返回
             if not knowledge_result.chunks:
