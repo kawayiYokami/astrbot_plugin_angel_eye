@@ -250,11 +250,10 @@ class SmartRetriever:
             ]
 
             # 调用Filter进行筛选
-            # 注意：此处暂时不传递 dialogue，因为 Filter 的 Prompt 可能需要不同的上下文
-            # 如果未来需要，可以修改 Filter 的接口
+            # 将格式化后的对话历史传递给Filter
             selected_title = await self.filter.select_best_entry(
-                contexts=[],  # 如果有对话上下文，传入这里
-                current_prompt="",  # 当前用户输入
+                contexts=[],  # 保持为空，因为dialogue已经格式化
+                current_prompt=dialogue, # 直接传递格式化后的dialogue
                 entity_name=entity_name,
                 candidate_list=candidate_list
             )
