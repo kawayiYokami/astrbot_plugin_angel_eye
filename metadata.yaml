@@ -1,9 +1,5 @@
-id: astrbot_plugin_angel_eye
-name: Angel Eye
-author: YourName
-version: 0.1.0
+name: astrbot_plugin_angel_eye
 description: 在调用大模型之前，通过小模型识别对话中的专有名词并链接百科知识，为大模型补充上下文，使其更“见多识广”。
-requirements:
-  - httpx
-  - beautifulsoup4
-config_schema: _conf_schema.json
+author: kawayiYokami
+version: 0.1.0
+repo: https://github.com/kawayiYokami/astrbot_plugin_angel_eye
