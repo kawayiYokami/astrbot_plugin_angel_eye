@@ -11,28 +11,52 @@
     "description": "传递给分析模型进行上下文理解的最大字符长度。过长的上下文可能影响分析效率。",
     "default": 2000
   },
-  "domain_acg_enabled": {
+  "moegirl_enabled": {
     "type": "bool",
-    "title": "启用 ACG 领域",
-    "description": "是否启用二次元/ACG领域的处理。",
+    "title": "启用萌娘百科",
+    "description": "是否在知识检索时使用萌娘百科 (zh.moegirl.org.cn)。",
     "default": true
   },
-  "domain_acg_client": {
-    "type": "string",
-    "title": "ACG 领域客户端",
-    "description": "用于ACG领域的百科客户端名称 (例如 'moegirl')。",
-    "default": "moegirl"
-  },
-  "domain_general_enabled": {
+  "wikipedia_enabled": {
     "type": "bool",
-    "title": "启用通用领域",
-    "description": "是否启用通用知识领域的处理。",
+    "title": "启用维基百科",
+    "description": "是否在知识检索时使用中文维基百科 (zh.wikipedia.org)。",
     "default": true
   },
-  "domain_general_client": {
-    "type": "string",
-    "title": "通用领域客户端",
-    "description": "用于通用领域的百科客户端名称 (例如 'general')。",
-    "default": "general"
+  "wikidata_enabled": {
+    "type": "bool",
+    "title": "启用维基数据",
+    "description": "是否在知识检索时使用维基数据 (www.wikidata.org) 进行结构化事实查询。",
+    "default": true
+  },
+  "text_length_threshold": {
+    "type": "int",
+    "title": "文本长度阈值",
+    "description": "决定是否调用AI进行归纳的文本长度阈值（字符数）",
+    "default": 2000
+  },
+  "max_search_results": {
+    "type": "int",
+    "title": "最大搜索结果数",
+    "description": "搜索时返回的最大结果数量",
+    "default": 3
+  },
+  "timeout_seconds": {
+    "type": "int",
+    "title": "请求超时时间",
+    "description": "HTTP请求的超时时间（秒）",
+    "default": 10
+  },
+  "llm_log_enabled": {
+    "type": "bool",
+    "title": "启用LLM交互日志",
+    "description": "是否记录LLM的一来一回交互日志到本地文件（logs/llm_interactions.log）",
+    "default": true
+  },
+  "llm_log_max_size_mb": {
+    "type": "int",
+    "title": "LLM日志最大尺寸(MB)",
+    "description": "LLM交互日志文件的最大尺寸（MB），超过后会自动滚动",
+    "default": 1
   }
 }

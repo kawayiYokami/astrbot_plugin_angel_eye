@@ -5,10 +5,10 @@ __pycache__/
 *.pyo
 *.pyd
 .pytest_cache
-
+angel_eye_cache/
 # IDE / Editor
 .idea/
 .vscode/
-
+logs/
 # Local config
 config.local.yaml
