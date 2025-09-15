@@ -1,5 +1,5 @@
 """
-萌娘百科API客户端，用于执行搜索和获取页面内容。
+维基百科API客户端，用于执行搜索和获取页面内容。
 继承自BaseWikiClient基类以减少代码重复。
 """
 
@@ -9,19 +9,20 @@ from ..core.log import get_logger
 
 logger = get_logger(__name__)
 
-class MoegirlClient(BaseWikiClient):
-    """萌娘百科客户端"""
+
+class WikipediaClient(BaseWikiClient):
+    """维基百科客户端"""
 
     def __init__(self, config: Dict):
         super().__init__(
-            api_endpoint="https://zh.moegirl.org.cn/api.php",
-            site_name="MoegirlClient",
+            api_endpoint="https://zh.wikipedia.org/w/api.php",
+            site_name="WikipediaClient",
             config=config
         )
 
     async def search(self, keyword: str, limit: int = 5) -> List[Dict[str, str]]:
         """
-        根据关键词搜索萌娘百科。
+        根据关键词搜索维基百科。
         为了与 Retriever 兼容，返回值为 List[Dict[str, str]]。
 
         :param keyword: 搜索的关键词
@@ -34,6 +35,7 @@ class MoegirlClient(BaseWikiClient):
             "list": "search",
             "srsearch": keyword,
             "srlimit": limit,
+            # 关键参数：请求返回摘要信息
             "srprop": "snippet"
         }
 
@@ -44,12 +46,14 @@ class MoegirlClient(BaseWikiClient):
         results = []
         for item in data["query"]["search"]:
             pageid = item['pageid']
-            url = f"https://zh.moegirl.org.cn/index.php?curid={pageid}"
+            # 构造维基百科的页面URL
+            url = f"https://zh.wikipedia.org/?curid={pageid}"
             # 返回 Retriever 需要的字典格式
             results.append({
                 "title": item['title'],
                 "url": url,
-                "pageid": pageid, # 将 pageid 也返回，以便后续使用
+                "pageid": pageid,
+                # 获取API返回的摘要信息
                 "snippet": item.get('snippet', '')
             })
         return results
@@ -60,7 +64,7 @@ class MoegirlClient(BaseWikiClient):
         为了兼容 Retriever，保留了 title 参数，但优先使用 pageid。
 
         :param title: 词条标题 (备用)
-        :param pageid: 萌娘百科页面的ID (首选)
+        :param pageid: 维基百科页面的ID (首选)
         :return: 页面的wikitext内容，如果请求失败则返回None
         """
         if not pageid:
@@ -71,6 +75,7 @@ class MoegirlClient(BaseWikiClient):
             "action": "parse",
             "format": "json",
             "pageid": pageid,
+            # 获取展开模板后的 Wikitext
             "prop": "wikitext"
         }
 
