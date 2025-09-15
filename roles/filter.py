@@ -84,6 +84,9 @@ class Filter:
         formatted_dialogue = self._format_dialogue(contexts, current_prompt)
         formatted_candidates = self._format_candidate_list(candidate_list)
 
+        # 增加诊断日志，捕获传入 format 的所有变量
+        logger.debug(f"AngelEye[Filter]: Formatting prompt with: dialogue='{formatted_dialogue}', entity_name='{entity_name}', candidate_list='{formatted_candidates}'")
+
         final_prompt = self.prompt_template.format(
             dialogue=formatted_dialogue,
             entity_name=entity_name,
