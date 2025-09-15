@@ -6,9 +6,8 @@ from typing import Optional, Dict
 from pathlib import Path
 
 
-from ..core.log import get_logger, log_llm_interaction
+from astrbot.api import logger
 from ..core.exceptions import AngelEyeError
-logger = get_logger(__name__)
 
 
 class Summarizer:
@@ -63,8 +62,6 @@ class Summarizer:
             response = await self.provider.text_chat(prompt=final_prompt)
             summary_text = response.completion_text.strip()
 
-            # 记录LLM交互
-            log_llm_interaction(prompt=final_prompt, response=summary_text)
 
             if summary_text:
                 logger.info(f"AngelEye[Summarizer]: 成功为实体 '{entity_name}' 生成摘要，长度: {len(summary_text)} 字符")

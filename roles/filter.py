@@ -7,10 +7,9 @@ import json
 from typing import List, Dict, Optional
 from pathlib import Path
 
-from ..core.log import get_logger, log_llm_interaction
+from astrbot.api import logger
 from ..core.exceptions import ParsingError, AngelEyeError
 
-logger = get_logger(__name__)
 
 
 class Filter:
@@ -94,9 +93,6 @@ class Filter:
         try:
             response = await self.provider.text_chat(prompt=final_prompt)
             response_text = response.completion_text
-
-            # 记录LLM交互
-            log_llm_interaction(prompt=final_prompt, response=response_text)
 
             # 提取JSON字符串
             json_str_start = response_text.find('{')

@@ -6,9 +6,8 @@ import httpx
 from typing import Dict, Optional, List
 from abc import ABC, abstractmethod
 
-from ..core.log import get_logger
+from astrbot.api import logger
 
-logger = get_logger(__name__)
 
 
 class BaseWikiClient(ABC):

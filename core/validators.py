@@ -3,10 +3,9 @@
 提供用于函数输入的装饰器
 """
 from functools import wraps
-from .log import get_logger
+from astrbot.api import logger
 from .exceptions import ValidationError
 
-logger = get_logger(__name__)
 
 def validate_input(max_length: int = None):
     """

@@ -6,11 +6,10 @@ import json
 from typing import List, Dict, Optional, Any
 from pathlib import Path
 
-from ..core.log import get_logger, log_llm_interaction
+from astrbot.api import logger
 from ..models.request import KnowledgeRequest
 from ..core.exceptions import ParsingError, AngelEyeError
 
-logger = get_logger(__name__)
 
 
 class Classifier:
@@ -73,9 +72,6 @@ class Classifier:
             logger.debug("AngelEye[Classifier]: 正在调用LLM分析对话...")
             response = await self.provider.text_chat(prompt=final_prompt)
             response_text = response.completion_text
-
-            # 记录LLM交互
-            log_llm_interaction(prompt=final_prompt, response=response_text)
 
             # 使用分隔符切分思考过程和JSON
             separator = "---JSON---"
