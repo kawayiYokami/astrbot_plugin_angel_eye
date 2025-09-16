@@ -64,5 +64,11 @@
     "title": "LLM日志最大尺寸(MB)",
     "description": "LLM交互日志文件的最大尺寸（MB），超过后会自动滚动",
     "default": 100
+  },
+  "max_history_chars": {
+    "type": "int",
+    "title": "最大聊天历史字符数",
+    "description": "在传递给分析模型进行QQ聊天历史摘要前，截取的最近聊天记录的最大字符数。",
+    "default": 50000
   }
 }

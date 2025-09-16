@@ -25,6 +25,7 @@ class Summarizer:
         self.provider = provider
         self.config = config
         self.max_context_length = self.config.get("max_context_length", 2000)
+        self.max_history_chars = self.config.get("max_history_chars", 50000)
 
         # 预加载所有 prompt 模板
         self.wiki_prompt_template = self._load_prompt("summarizer_prompt.md")
@@ -69,9 +70,8 @@ class Summarizer:
         elif source == "qq_chat_history":
             prompt_template = self.chat_prompt_template
             # 聊天记录的 prompt 可能需要不同的变量和长度控制
-            MAX_HISTORY_CHARS = 10000
-            if len(full_content) > MAX_HISTORY_CHARS:
-                full_content = f"...(部分历史记录已省略)...\n{full_content[-MAX_HISTORY_CHARS:]}"
+            if len(full_content) > self.max_history_chars:
+                full_content = f"...(部分历史记录已省略)...\n{full_content[-self.max_history_chars:]}"
             final_prompt = prompt_template.format(
                 historical_chat=full_content,
                 latest_dialogue=dialogue
