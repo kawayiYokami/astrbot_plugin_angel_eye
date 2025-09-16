@@ -2,7 +2,7 @@
 
 import asyncio
 from diskcache import Cache
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 from collections import defaultdict
 from astrbot.api import logger # 导入上游 logger
 
@@ -60,6 +60,20 @@ async def set_knowledge(key: str, value: str):
         # 记录错误而不是静默忽略
         logger.error(f"AngelEye: 写入缓存失败 (key: {key})", exc_info=e)
 
+async def get_object(key: str) -> Optional[Any]:
+    """
+    从缓存中异步获取任意 Python 对象。
+    """
+    _ensure_cache_initialized()
+    return await asyncio.to_thread(_cache.get, key)
+
+async def set_object(key: str, value: Any, expire: int = CACHE_EXPIRATION):
+    """
+    将任意 Python 对象异步存入缓存。
+    """
+    _ensure_cache_initialized()
+    await asyncio.to_thread(_cache.set, key, value, expire=expire)
+
 def build_doc_key(source: str, entity_name: str) -> str:
     """为文档知识构建缓存键"""
     return f"doc:{source}:{entity_name}"
@@ -95,3 +109,7 @@ async def reset_cache_stats():
     async with _cache_lock:
         global _cache_stats
         _cache_stats = defaultdict(int)
+
+# 为了保持向后兼容性，保留旧的导入名
+get_chat_history = get_object
+set_chat_history = set_object

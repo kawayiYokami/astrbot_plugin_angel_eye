@@ -26,21 +26,29 @@ class Summarizer:
         self.config = config
         self.max_context_length = self.config.get("max_context_length", 2000)
 
-        prompt_path = Path(__file__).parent.parent / "prompts" / "summarizer_prompt.md"
+        # 预加载所有 prompt 模板
+        self.wiki_prompt_template = self._load_prompt("summarizer_prompt.md")
+        self.chat_prompt_template = self._load_prompt("qq_chat_history_summarizer_prompt.md")
+
+    def _load_prompt(self, filename: str) -> str:
+        """加载 prompt 模板的辅助函数"""
+        prompt_path = Path(__file__).parent.parent / "prompts" / filename
         try:
-            self.prompt_template = prompt_path.read_text(encoding="utf-8")
-            logger.info("AngelEye[Summarizer]: 成功加载Prompt模板")
+            prompt_template = prompt_path.read_text(encoding="utf-8")
+            logger.debug(f"AngelEye[Summarizer]: 成功加载Prompt模板 {filename}")
+            return prompt_template
         except FileNotFoundError:
             logger.error(f"AngelEye[Summarizer]: 找不到Prompt文件 {prompt_path}")
-            self.prompt_template = "为实体 {entity_name} 生成摘要:\n{full_content}"
+            return "为实体 {entity_name} 生成摘要:\n{full_content}"
 
-    async def summarize(self, full_content: str, entity_name: str, dialogue: str) -> Optional[str]:
+    # --- 这是唯一暴露给外面的方法 ---
+    async def summarize(self, source: str, full_content: str, entity_name: str, dialogue: str) -> Optional[str]:
         """
-        调用LLM对百科全文进行摘要，生成背景知识
-        严格遵循"宁缺毋滥"原则，避免生成无关内容
+        统一的摘要方法，根据数据源选择不同的 prompt 模板。
 
-        :param full_content: 百科页面的完整内容
-        :param entity_name: 需要摘要的实体名称
+        :param source: 数据源 ("wikipedia", "moegirl", "qq_chat_history")
+        :param full_content: 原始长文本内容
+        :param entity_name: 实体名称
         :param dialogue: 格式化后的对话历史
         :return: 总结好的背景知识文本，如果生成失败则返回None
         """
@@ -48,28 +56,41 @@ class Summarizer:
             logger.error("AngelEye[Summarizer]: 分析模型Provider未初始化")
             return None
 
-        # 截断内容以符合模型上下文限制
-        content_to_summarize = full_content[:self.max_context_length]
+        # 1. "三选一" 选择 prompt
+        if source in ["wikipedia", "moegirl"]:
+            prompt_template = self.wiki_prompt_template
+            # 截断内容以符合模型上下文限制
+            content_to_summarize = full_content[:self.max_context_length]
+            final_prompt = prompt_template.format(
+                full_content=content_to_summarize,
+                entity_name=entity_name,
+                dialogue=dialogue
+            )
+        elif source == "qq_chat_history":
+            prompt_template = self.chat_prompt_template
+            # 聊天记录的 prompt 可能需要不同的变量和长度控制
+            MAX_HISTORY_CHARS = 10000
+            if len(full_content) > MAX_HISTORY_CHARS:
+                full_content = f"...(部分历史记录已省略)...\n{full_content[-MAX_HISTORY_CHARS:]}"
+            final_prompt = prompt_template.format(
+                historical_chat=full_content,
+                latest_dialogue=dialogue
+            )
+        else:
+            logger.warning(f"AngelEye[Summarizer]: 不支持的摘要源: {source}")
+            return None
 
-        final_prompt = self.prompt_template.format(
-            entity_name=entity_name,
-            full_content=content_to_summarize,
-            dialogue=dialogue
-        )
+        # 2. "合流"：统一调用小模型
+        logger.info(f"AngelEye: 使用 {source} 模板为 '{entity_name}' 生成摘要...")
+        logger.debug(f"AngelEye[Summarizer]: 向分析模型发送的输入:\n---\n{final_prompt}\n---")
+        response = await self.provider.text_chat(prompt=final_prompt)
+        summary_text = response.completion_text.strip()
+        logger.debug(f"AngelEye[Summarizer]: 从分析模型接收的输出:\n---\n{summary_text}\n---")
 
-        try:
-            logger.debug(f"AngelEye[Summarizer]: 正在为实体 '{entity_name}' 生成摘要...")
-            response = await self.provider.text_chat(prompt=final_prompt)
-            summary_text = response.completion_text.strip()
-
-
-            if summary_text:
-                logger.info(f"AngelEye[Summarizer]: 成功为实体 '{entity_name}' 生成摘要，长度: {len(summary_text)} 字符")
-                return summary_text
-            else:
-                logger.warning(f"AngelEye[Summarizer]: 实体 '{entity_name}' 的摘要为空")
-                return None
-
-        except Exception as e:
-            logger.error(f"AngelEye[Summarizer]: 为实体 '{entity_name}' 生成摘要时发生错误: {e}", exc_info=True)
-            raise AngelEyeError(f"Summarizer failed for entity '{entity_name}'") from e
+        # 3. 统一返回结果
+        if summary_text:
+            logger.info(f"AngelEye: 成功为实体 '{entity_name}' 生成摘要，长度: {len(summary_text)} 字符")
+            return summary_text
+        else:
+            logger.warning(f"AngelEye: 实体 '{entity_name}' 的摘要为空")
+            return None

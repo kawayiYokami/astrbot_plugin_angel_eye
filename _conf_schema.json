@@ -63,6 +63,6 @@
     "type": "int",
     "title": "LLM日志最大尺寸(MB)",
     "description": "LLM交互日志文件的最大尺寸（MB），超过后会自动滚动",
-    "default": 1
+    "default": 100
   }
 }
