@@ -24,13 +24,14 @@ class Filter:
         :param provider: 用于调用LLM的Provider
         """
         self.provider = provider
-        prompt_path = Path(__file__).parent.parent / "prompts" / "filter_prompt.md"
-        try:
-            self.prompt_template = prompt_path.read_text(encoding="utf-8")
-            logger.info("AngelEye[Filter]: 成功加载Prompt模板")
-        except FileNotFoundError:
-            logger.error(f"AngelEye[Filter]: 找不到Prompt文件 {prompt_path}")
-            self.prompt_template = "筛选最匹配的词条。对话: {dialogue}\n实体: {entity_name}\n候选: {candidate_list}"
+        # 存储模板文件路径，用于在每次调用时重新加载，防止状态污染
+        self.prompt_path = Path(__file__).parent.parent / "prompts" / "filter_prompt.md"
+
+        # (可选) 在初始化时检查文件是否存在，实现快速失败
+        if not self.prompt_path.exists():
+            logger.error(f"AngelEye[Filter]: 关键的Prompt文件缺失，路径: {self.prompt_path}")
+            # 这里可以选择抛出异常，但为了保持向后兼容性，仅记录错误
+            # raise FileNotFoundError(f"Filter prompt file not found at {self.prompt_path}")
 
     def _format_dialogue(self, contexts: List[Dict], current_prompt: str) -> str:
         """
@@ -86,10 +87,16 @@ class Filter:
 
         # 增加诊断日志，捕获传入 format 的所有变量
         logger.info(f"AngelEye[Filter]: Formatting prompt with: dialogue='{formatted_dialogue}', entity_name='{entity_name}', candidate_list='{formatted_candidates}'")
-        # 在 format 前打印模板内容，以检查是否被污染
-        logger.info(f"AngelEye[Filter]: Current prompt template before format: {self.prompt_template}")
 
-        final_prompt = self.prompt_template.format(
+        # 从文件重新加载模板，防止因复用导致的状态污染
+        try:
+            prompt_template = self.prompt_path.read_text(encoding="utf-8")
+        except Exception as e:
+            logger.error(f"AngelEye[Filter]: 运行时读取Prompt文件失败: {e}", exc_info=True)
+            # 使用备用模板作为降级策略
+            prompt_template = "筛选最匹配的词条。对话: {dialogue}\n实体: {entity_name}\n候选: {candidate_list}"
+
+        final_prompt = prompt_template.format(
             dialogue=formatted_dialogue,
             entity_name=entity_name,
             candidate_list=formatted_candidates
