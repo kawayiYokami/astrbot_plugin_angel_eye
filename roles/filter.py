@@ -9,6 +9,7 @@ from pathlib import Path
 
 from astrbot.api import logger
 from ..core.exceptions import ParsingError, AngelEyeError
+from ..core.formatter import format_unified_message
 
 
 
@@ -32,20 +33,6 @@ class Filter:
             logger.error(f"AngelEye[Filter]: 关键的Prompt文件缺失，路径: {self.prompt_path}")
             # 这里可以选择抛出异常，但为了保持向后兼容性，仅记录错误
             # raise FileNotFoundError(f"Filter prompt file not found at {self.prompt_path}")
-
-    def _format_dialogue(self, contexts: List[Dict], current_prompt: str) -> str:
-        """
-        将对话历史和当前问题格式化为单个字符串，供模型分析。
-        """
-        dialogue_parts = []
-        for item in contexts:
-            # AstrBot 的上下文通常是 {'role': 'user'/'assistant', 'content': '...'}
-            role = item.get("role", "unknown").capitalize()
-            content = item.get("content", "")
-            dialogue_parts.append(f"{role}: {content}")
-
-        dialogue_parts.append(f"User: {current_prompt}")
-        return "\n".join(dialogue_parts)
 
     def _format_candidate_list(self, candidate_list: List[Dict]) -> str:
         """
@@ -77,16 +64,23 @@ class Filter:
             return None
 
         if not candidate_list:
-            logger.info(f"AngelEye[Filter]: 实体 '{entity_name}' 的候选列表为空")
+            logger.info(f"AngelEye[Filter]: 实体 '{entity_name}' 的候选列表为空，跳过筛选")
             return None
 
-        logger.info(f"AngelEye[Filter]: 为实体 '{entity_name}' 从 {len(candidate_list)} 个候选中筛选")
+        logger.info(f"AngelEye[Filter]: 为实体 '{entity_name}' 从 {len(candidate_list)} 个候选中进行筛选...")
 
-        formatted_dialogue = self._format_dialogue(contexts, current_prompt)
+        # 将 astrbot 上下文转换为统一格式
+        dialogue_parts = []
+        for item in contexts:
+            dialogue_parts.append(format_unified_message(item))
+        # 处理当前消息
+        current_message_dict = {
+            "role": "user",
+            "content": current_prompt
+        }
+        dialogue_parts.append(format_unified_message(current_message_dict))
+        formatted_dialogue = "\n".join(dialogue_parts)
         formatted_candidates = self._format_candidate_list(candidate_list)
-
-        # 增加诊断日志，捕获传入 format 的所有变量
-        logger.info(f"AngelEye[Filter]: Formatting prompt with: dialogue='{formatted_dialogue}', entity_name='{entity_name}', candidate_list='{formatted_candidates}'")
 
         # 从文件重新加载模板，防止因复用导致的状态污染
         try:
@@ -106,16 +100,25 @@ class Filter:
             response = await self.provider.text_chat(prompt=final_prompt)
             response_text = response.completion_text
 
-            # 提取JSON字符串
-            json_str_start = response_text.find('{')
-            json_str_end = response_text.rfind('}') + 1
+            # --- 开始修改 ---
+            separator = '---JSON---'
+            if separator in response_text:
+                json_part = response_text.split(separator, 1)[1]
+            else:
+                # 降级处理：如果模型忘记输出分隔符，则在整个文本中查找
+                logger.warning("AngelEye[Filter]: 模型输出中未找到'---JSON---'分隔符，将尝试在整个响应中解析。")
+                json_part = response_text
+
+            json_str_start = json_part.find('{')
+            json_str_end = json_part.rfind('}') + 1
 
             if json_str_start == -1 or json_str_end <= json_str_start:
                 logger.warning(f"AngelEye[Filter]: 模型未返回有效的JSON结构")
                 logger.debug(f"原始返回: {response_text}")
                 return None
 
-            json_str = response_text[json_str_start:json_str_end]
+            json_str = json_part[json_str_start:json_str_end]
+            # --- 结束修改 ---
             response_json = json.loads(json_str)
 
             selected_title = response_json.get("selected_title")

@@ -2,7 +2,7 @@
 知识请求数据模型
 定义前端分类器生成的轻量级指令格式
 """
-from typing import Dict, List
+from typing import Dict, List, Any
 from pydantic import BaseModel, Field
 
 
@@ -13,9 +13,13 @@ class KnowledgeRequest(BaseModel):
     """
     required_docs: Dict[str, str] = Field(
         default_factory=dict,
-        description="需要查询的文档，键是实体名称，值是数据源(wikipedia/moegirl)"
+        description="需要查询的文档，键是实体名称，值是数据源(wikipedia/moegirl/qq_chat_history)"
     )
     required_facts: List[str] = Field(
         default_factory=list,
         description="需要查询的结构化事实，格式为'实体名.属性名'"
+    )
+    parameters: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="来自Classifier的额外参数，例如 time_range_days 或 message_count"
     )

@@ -267,7 +267,7 @@ class WikidataClient:
 
         entity_qid = entity["id"]
         entity_label = entity["label"]
-        logger.info(f"AngelEye[WikidataClient]: 实体链接成功 '{entity_name}' -> {entity_label} ({entity_qid})")
+        logger.debug(f"AngelEye[WikidataClient]: 实体链接成功 '{entity_name}' -> {entity_label} ({entity_qid})")
 
         # 2. 属性链接
         fact_name_to_pid = {}

@@ -28,27 +28,10 @@ class Classifier:
         prompt_path = Path(__file__).parent.parent / "prompts" / "classifier_prompt.md"
         try:
             self.prompt_template = prompt_path.read_text(encoding="utf-8")
-            logger.info("AngelEye[Classifier]: 成功加载Prompt模板")
+            logger.debug("AngelEye[Classifier]: 成功加载Prompt模板")
         except FileNotFoundError:
             logger.error(f"AngelEye[Classifier]: 找不到Prompt文件 {prompt_path}")
             self.prompt_template = "分析对话: {dialogue}"
-
-    def _format_dialogue(self, contexts: List[Dict], current_prompt: str) -> str:
-        """
-        将对话历史和当前问题格式化为单个字符串
-
-        :param contexts: 对话历史记录
-        :param current_prompt: 当前用户输入
-        :return: 格式化后的对话字符串
-        """
-        dialogue_parts = []
-        for item in contexts:
-            role = item.get("role", "unknown").capitalize()
-            content = item.get("content", "")
-            dialogue_parts.append(f"{role}: {content}")
-
-        dialogue_parts.append(f"User: {current_prompt}")
-        return "\n".join(dialogue_parts)
 
     async def get_knowledge_request(self, contexts: List[Dict], current_prompt: str) -> Optional[KnowledgeRequest]:
         """
@@ -62,7 +45,26 @@ class Classifier:
             logger.error("AngelEye[Classifier]: 分析模型Provider未初始化")
             return None
 
-        formatted_dialogue = self._format_dialogue(contexts, current_prompt)
+        # 将 astrbot 上下文转换为统一格式
+        dialogue_parts = []
+        for item in contexts:
+            role = item.get("role", "unknown")
+            content = item.get("content", "")
+
+            if role == "user":
+                # 直接在 content 前面加上角色前缀
+                dialogue_parts.append(f"[用户]{content}")
+            elif role == "assistant":
+                dialogue_parts.append(f"[助理]{content}")
+            else:
+                # 对于未知角色，可以选择跳过或标记
+                dialogue_parts.append(f"[未知角色]{content}")
+
+        # 处理当前消息 (current_prompt)
+        # 注意：current_prompt 是纯净的，不包含元数据
+        dialogue_parts.append(f"[用户]{current_prompt}")
+
+        formatted_dialogue = "\n".join(dialogue_parts)
         # 动态转义模板中的所有花括号，然后恢复我们需要的占位符
         safe_template = self.prompt_template.replace('{', '{{').replace('}', '}}').replace('{{dialogue}}', '{dialogue}')
         final_prompt = safe_template.format(dialogue=formatted_dialogue)
@@ -70,8 +72,10 @@ class Classifier:
         try:
             # 调用LLM
             logger.debug("AngelEye[Classifier]: 正在调用LLM分析对话...")
+            logger.debug(f"AngelEye[Classifier]: 向分析模型发送的输入:\n---\n{final_prompt}\n---")
             response = await self.provider.text_chat(prompt=final_prompt)
             response_text = response.completion_text
+            logger.debug(f"AngelEye[Classifier]: 从分析模型接收的输出:\n---\n{response_text}\n---")
 
             # 使用分隔符切分思考过程和JSON
             separator = "---JSON---"
@@ -105,13 +109,15 @@ class Classifier:
             # 转换为KnowledgeRequest对象
             request = KnowledgeRequest(
                 required_docs=response_json.get("required_docs", {}),
-                required_facts=response_json.get("required_facts", [])
+                required_facts=response_json.get("required_facts", []),
+                parameters=response_json.get("parameters", {})  # 新增 parameters 字段
             )
 
             # 记录生成的请求
             logger.info(f"AngelEye[Classifier]: 生成知识请求 - "
                        f"文档: {len(request.required_docs)}, "
-                       f"事实: {len(request.required_facts)}")
+                       f"事实: {len(request.required_facts)}, "
+                       f"参数: {len(request.parameters)}")
 
             # 如果请求为空，返回None
             if not request.required_docs and not request.required_facts:
