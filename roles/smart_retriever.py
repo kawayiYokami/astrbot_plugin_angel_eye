@@ -17,7 +17,7 @@ from .summarizer import Summarizer
 # from .retriever_qqchat import QQChatHistoryRetriever # 移除旧的导入
 from ..services.qq_history_service import QQChatHistoryService # 导入新的服务
 from ..core.wikitext_cleaner import clean as clean_wikitext
-from ..core.cache_manager import get_knowledge, set_knowledge, build_doc_key, build_fact_key, build_search_key
+from ..core.cache_manager import get, set, build_doc_key, build_fact_key, build_search_key
 
 
 
@@ -152,7 +152,7 @@ class SmartRetriever:
             for fact_name in fact_names:
                 fact_query = f"{entity_name}.{fact_name}"
                 cache_key = build_fact_key(fact_query)
-                cached_value = await get_knowledge(cache_key)
+                cached_value = await get(cache_key)
                 if cached_value:
                     logger.debug(f"AngelEye: 命中事实缓存 (Key: {cache_key})")
                     combined_content_lines.append(f"- {fact_name}: {cached_value}")
@@ -186,7 +186,7 @@ class SmartRetriever:
                             cache_key = build_fact_key(fact_query)
                             logger.debug(f"AngelEye: 将新事实存入缓存 (Key: {cache_key})")
                             # 注意：只缓存值，而不是 "key: value" 字符串
-                            set_knowledge(cache_key, str(fact_value))
+                            await set(cache_key, str(fact_value))
 
                     if fact_lines:
                         chunks.append(KnowledgeChunk(
@@ -213,7 +213,7 @@ class SmartRetriever:
         """
         # 1. 检查搜索结果列表的缓存
         search_cache_key = build_search_key(source, entity_name)
-        cached_search_results = await get_knowledge(search_cache_key)
+        cached_search_results = await get(search_cache_key)
 
         if cached_search_results:
             logger.debug(f"AngelEye: 命中搜索结果缓存 (Key: {search_cache_key})")
@@ -230,7 +230,7 @@ class SmartRetriever:
             search_results = await client.search(entity_name, limit=self.max_search_results)
             if search_results:
                 logger.debug(f"AngelEye: 将新搜索结果存入缓存 (Key: {search_cache_key})")
-                set_knowledge(search_cache_key, search_results) # 缓存整个列表
+                await set(search_cache_key, search_results) # 缓存整个列表
 
         if not search_results:
             logger.info(f"AngelEye: '{entity_name}' 在 {source} 中无搜索结果")
@@ -287,7 +287,7 @@ class SmartRetriever:
 
         # 3. 检查原始页面内容的缓存
         cache_key = build_doc_key(source, selected_entry)
-        cached_content = await get_knowledge(cache_key)
+        cached_content = await get(cache_key)
 
         if cached_content:
             logger.debug(f"AngelEye: 命中原始页面缓存 (Key: {cache_key})")
@@ -306,6 +306,10 @@ class SmartRetriever:
             if not full_content:
                 logger.warning(f"AngelEye: 无法获取 '{selected_entry}' 的内容")
                 return None
+            else:
+                # 成功获取后，立即缓存原始内容，以便下次快速复用
+                logger.debug(f"AngelEye: 成功获取 '{selected_entry}' 的全文，存入缓存...")
+                await set(cache_key, full_content)
 
 
         # 4. 内容过长则调用AI进行归纳，否则只做清洗
@@ -322,11 +326,6 @@ class SmartRetriever:
 
         # 5. 构建并返回 KnowledgeChunk
         if final_content:
-            # **核心：在这里缓存最终结果**
-            # 使用修正后的缓存键 (见下一点)
-            final_cache_key = build_doc_key(source, selected_entry)
-            await set_knowledge(final_cache_key, final_content)
-
             return KnowledgeChunk(
                 source=source,
                 entity=entity_name,

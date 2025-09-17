@@ -73,10 +73,12 @@ class Classifier:
         try:
             # 调用LLM
             logger.debug("AngelEye[Classifier]: 正在调用LLM分析对话...")
-            logger.debug(f"AngelEye[Classifier]: 向分析模型发送的输入:\n---\n{final_prompt}\n---")
+            # 可选：记录发送的核心上下文而非完整提示词
+            # logger.debug(f"AngelEye[Classifier]: 发送的上下文: {formatted_dialogue}")
             response = await self.provider.text_chat(prompt=final_prompt)
             response_text = response.completion_text
-            logger.debug(f"AngelEye[Classifier]: 从分析模型接收的输出:\n---\n{response_text}\n---")
+            # 记录AI的原始输出
+            logger.debug(f"AngelEye[Classifier]: LLM原始响应:\n{response_text}")
 
             # 使用新的、健壮的JSON解析器
             response_json = safe_extract_json(response_text)

@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, TYPE_CHECKING
 
 from astrbot.api import logger
-from ..core.cache_manager import get_chat_history, set_chat_history
+from ..core.cache_manager import get, set
 from ..core.formatter import format_unified_message # 导入新的格式化工具
 
 if TYPE_CHECKING:

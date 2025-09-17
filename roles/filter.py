@@ -98,8 +98,13 @@ class Filter:
         )
 
         try:
+            logger.debug(f"AngelEye[Filter]: 正在调用LLM进行筛选...")
+            # 可选：记录发送的核心上下文
+            # logger.debug(f"AngelEye[Filter]: 发送的上下文: {formatted_dialogue[:200]}...")
+            # logger.debug(f"AngelEye[Filter]: 候选列表: {formatted_candidates}")
             response = await self.provider.text_chat(prompt=final_prompt)
             response_text = response.completion_text
+            logger.debug(f"AngelEye[Filter]: LLM原始响应:\n{response_text}")
 
             # 使用新的、健壮的JSON解析器，并指定必须包含 "selected_title" 字段
             response_json = safe_extract_json(

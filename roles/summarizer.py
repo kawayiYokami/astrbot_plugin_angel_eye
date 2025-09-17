@@ -82,10 +82,11 @@ class Summarizer:
 
         # 2. "合流"：统一调用小模型
         logger.info(f"AngelEye: 使用 {source} 模板为 '{entity_name}' 生成摘要...")
-        logger.debug(f"AngelEye[Summarizer]: 向分析模型发送的输入:\n---\n{final_prompt}\n---")
+        # 可选：记录发送的核心上下文
+        # logger.debug(f"AngelEye[Summarizer]: 发送的实体: {entity_name}")
         response = await self.provider.text_chat(prompt=final_prompt)
         summary_text = response.completion_text.strip()
-        logger.debug(f"AngelEye[Summarizer]: 从分析模型接收的输出:\n---\n{summary_text}\n---")
+        logger.debug(f"AngelEye[Summarizer]: LLM原始响应:\n{summary_text}")
 
         # 3. 统一返回结果
         if summary_text:
