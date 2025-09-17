@@ -314,15 +314,19 @@ class SmartRetriever:
                 await set(cache_key, full_content)
 
 
-        # 4. 内容过长则调用AI进行归纳，否则只做清洗
+        # 4. 内容过长则根据开关决定是否调用AI进行归纳，否则只做清洗
         if len(full_content) > self.TEXT_LENGTH_THRESHOLD:
-            logger.info(f"AngelEye: 内容过长 ({len(full_content)} > {self.TEXT_LENGTH_THRESHOLD})，调用Summarizer进行摘要...")
-            final_content = await self.summarizer.summarize(
-                source=source,
-                full_content=full_content,
-                entity_name=selected_entry,
-                dialogue=formatted_dialogue
-            )
+            if self.config.get("wiki_summarizer_enabled", True):
+                logger.info(f"AngelEye: 内容过长 ({len(full_content)} > {self.TEXT_LENGTH_THRESHOLD})，调用Summarizer进行摘要...")
+                final_content = await self.summarizer.summarize(
+                    source=source,
+                    full_content=full_content,
+                    entity_name=selected_entry,
+                    dialogue=formatted_dialogue
+                )
+            else:
+                logger.info(f"AngelEye: 内容过长 ({len(full_content)} > {self.TEXT_LENGTH_THRESHOLD})，但摘要功能已禁用，直接使用清洗后原文...")
+                final_content = clean_wikitext(full_content)
         else:
             final_content = clean_wikitext(full_content) # 如果内容不长，只做清洗
 
@@ -402,9 +406,9 @@ class SmartRetriever:
             # 拼接历史聊天记录
             historical_chat = "\n".join(formatted_messages)
 
-            # 3. 根据 needs_summary 标志决定是否调用 Summarizer
-            if needs_summary:
-                # 如果需要总结，才调用 Summarizer
+            # 3. 根据 needs_summary 标志和开关决定是否调用 Summarizer
+            if needs_summary and self.config.get("chat_summarizer_enabled", True):
+                # 如果需要总结，且开关开启，才调用 Summarizer
                 logger.info(f"AngelEye: 需要精选聊天记录，调用Summarizer...")
                 final_content = await self.summarizer.summarize(
                     source="qq_chat_history",
@@ -417,8 +421,9 @@ class SmartRetriever:
                     logger.warning(f"AngelEye: 聊天记录分析失败，返回原始记录摘要。")
                     final_content = f"关于“{entity_name}”的讨论摘要：\n" + historical_chat[:500] + "..."
             else:
-                # 如果不需要总结，直接使用原始记录
-                logger.info(f"AngelEye: 无需精选聊天记录，直接返回原文。")
+                # 如果不需要总结，或开关关闭，直接使用原始记录
+                action = "无需精选" if not needs_summary else "摘要功能已禁用"
+                logger.info(f"AngelEye: {action}聊天记录，直接返回原文。")
                 final_content = historical_chat
 
             # 5. 构建并返回 KnowledgeChunk

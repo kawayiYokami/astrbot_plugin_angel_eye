@@ -76,5 +76,17 @@
     "title": "最大聊天历史字符数",
     "description": "在传递给分析模型进行QQ聊天历史摘要前，截取的最近聊天记录的最大字符数。",
     "default": 50000
+  },
+  "wiki_summarizer_enabled": {
+    "type": "bool",
+    "title": "启用百科内容摘要",
+    "description": "是否使用AI模型对过长的百科内容进行摘要。关闭后，将直接使用经过基础清洗的原文，速度更快但内容更长。",
+    "default": true
+  },
+  "chat_summarizer_enabled": {
+    "type": "bool",
+    "title": "启用聊天记录摘要",
+    "description": "是否使用AI模型对QQ聊天记录进行摘要。关闭后，将直接使用原始聊天记录，速度更快但内容更长。",
+    "default": true
   }
 }

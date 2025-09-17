@@ -74,6 +74,11 @@ pip install httpx beautifulsoup4 pydantic diskcache
 
 **其他主要配置**
 
+| 配置项 | 默认值 | 说明 |
+| :--- | :--- | :--- |
+| `wiki_summarizer_enabled` | `true` | 是否使用AI模型对过长的百科内容进行摘要。关闭后，将直接使用经过基础清洗的原文。 |
+| `chat_summarizer_enabled` | `true` | 是否使用AI模型对QQ聊天记录进行摘要。关闭后，将直接使用原始聊天记录。 |
+
 ```json
 {
   "persona_name": "fairy|仙灵",
@@ -88,7 +93,9 @@ pip install httpx beautifulsoup4 pydantic diskcache
   "max_search_results": 3,
   "timeout_seconds": 10,
   "llm_log_max_size_mb": 100,
-  "max_history_chars": 50000
+  "max_history_chars": 50000,
+  "wiki_summarizer_enabled": true,
+  "chat_summarizer_enabled": true
 }
 ```
 
