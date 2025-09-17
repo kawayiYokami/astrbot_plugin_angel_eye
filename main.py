@@ -41,18 +41,27 @@ class AngelEyePlugin(star.Star):
         在主模型请求前，执行上下文增强逻辑
         这是 Angel Eye 的核心入口点，使用新的智能知识获取架构
         """
-        # 在事件处理时即时获取 Provider
-        analyzer_provider_id = self.config.get("analyzer_provider_id", "claude-3-haiku")
-        analyzer_provider: Provider = self.context.get_provider_by_id(analyzer_provider_id)
+        # 在事件处理时即时获取三个独立的 Provider
+        classifier_model_id = self.config.get("classifier_model_id", "claude-3-sonnet")
+        filter_model_id = self.config.get("filter_model_id", "claude-3-haiku")
+        summarizer_model_id = self.config.get("summarizer_model_id", "claude-3-haiku")
 
+        classifier_provider: Provider = self.context.get_provider_by_id(classifier_model_id)
+        filter_provider: Provider = self.context.get_provider_by_id(filter_model_id)
+        summarizer_provider: Provider = self.context.get_provider_by_id(summarizer_model_id)
 
-        if not analyzer_provider:
-            logger.warning(f"AngelEye: 分析模型Provider '{analyzer_provider_id}' 未找到或未配置，跳过上下文增强")
+        # 健壮性检查
+        if not all([classifier_provider, filter_provider, summarizer_provider]):
+            missing = []
+            if not classifier_provider: missing.append(f"分类模型({classifier_model_id})")
+            if not filter_provider: missing.append(f"筛选模型({filter_model_id})")
+            if not summarizer_provider: missing.append(f"摘要模型({summarizer_model_id})")
+            logger.warning(f"AngelEye: 以下必要的模型未找到或未配置，跳过上下文增强: {', '.join(missing)}")
             return
 
         # 在每次请求时创建新的角色实例，避免状态污染
-        classifier = Classifier(analyzer_provider)
-        smart_retriever = SmartRetriever(analyzer_provider, self.config)
+        classifier = Classifier(classifier_provider)
+        smart_retriever = SmartRetriever(filter_provider, summarizer_provider, self.config)
 
         logger.info("AngelEye: 开始上下文增强流程")
         original_prompt = req.prompt

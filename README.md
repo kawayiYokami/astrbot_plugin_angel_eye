@@ -12,12 +12,13 @@ Angel Eye 是一个 AstrBot 插件，旨在解决大语言模型（LLM）的"记
 
 ## ✨ 核心特性
 
-- 🤖 **智能上下文分析**: 自动识别对话中需要补充知识的专有名词
-- 🔍 **多源知识检索**: 支持维基百科、萌娘百科、维基数据等多个知识源
-- ⚡ **轻量级架构**: 使用小模型进行智能分析，降低计算成本
-- 🎯 **精准匹配**: 基于对话上下文智能选择最相关的知识条目
-- 💾 **智能缓存**: 本地缓存机制减少重复网络请求
-- 🔧 **可配置**: 灵活的配置选项，支持按需启用/禁用不同数据源
+- 🤖 **智能上下文分析**: 自动识别对话中需要补充知识的专有名词。
+- 💬 **群聊历史分析**: 可通过自然语言指令，回顾和总结群聊历史记录。
+- 🔍 **多源知识检索**: 支持维基百科、萌娘百科、维基数据等多个知识源。
+- ⚡ **可插拔多模型架构**: 支持为分析、筛选、摘要等不同任务配置独立的大语言模型，实现成本与效果的最佳平衡。
+- 🎯 **精准匹配**: 基于对话上下文智能选择最相关的知识条目。
+- 💾 **智能缓存**: 本地缓存机制减少重复网络请求。
+- 🔧 **高度可配置**: 灵活的配置选项，支持按需启用/禁用不同数据源和调整模型。
 
 ## 🏗️ 架构设计
 
@@ -26,19 +27,19 @@ Angel Eye 采用轻量级指令驱动的架构，包含三个核心角色：
 ### 🎭 角色系统
 
 1. **Classifier (分类器)**
-   - 分析对话上下文
-   - 生成轻量级知识请求指令
-   - 判断需要查询的实体和事实
+   - **核心职责**: 分析对话上下文，生成知识请求指令。
+   - **绑定模型**: `classifier_model_id` (推荐使用高智能模型，如 Claude 3 Sonnet)。
 
-2. **SmartRetriever (智能检索器)**
-   - 执行多源知识检索
-   - 实现动态执行策略
-   - 处理缓存和网络请求
+2. **Filter (筛选器)**
+   - **核心职责**: 从多个搜索结果中筛选出与对话最相关的条目。
+   - **绑定模型**: `filter_model_id` (推荐使用快速、低成本的模型，如 Claude 3 Haiku)。
 
 3. **Summarizer (摘要器)**
-   - 提炼百科内容为简洁背景知识
-   - 遵循"宁缺毋滥"原则
-   - 过滤无关信息
+   - **核心职责**: 将百科全文或聊天记录提炼成简洁的背景知识。
+   - **绑定模型**: `summarizer_model_id` (推荐使用兼具理解和生成能力均衡的模型)。
+
+4. **SmartRetriever (智能检索器)**
+   - **核心职责**: 作为调度中心，执行多源知识检索、处理缓存和网络请求。
 
 ## 🚀 快速开始
 
@@ -61,22 +62,33 @@ pip install httpx beautifulsoup4 pydantic diskcache
 
 ### 配置
 
-编辑 `_conf_schema.json` 或通过 AstrBot 界面配置：
+插件的核心配置在 `_conf_schema.json` 文件中定义，你也可以通过 AstrBot 的网页端进行配置。
+
+**模型配置**
+
+| 配置项 | 默认模型 | 职责 | 推荐 |
+| :--- | :--- | :--- | :--- |
+| `classifier_model_id` | `gemini-2.5-flash` | **意图分析**：分析用户输入，决定是否需要以及需要何种知识。 | 使用能力最强的模型，保证分析的准确性。 |
+| `filter_model_id` | `gemini-2.5-flash-lite` | **结果筛选**：从多个搜索结果中选出最匹配的一项。 | 使用速度快、成本低的模型，追求效率。 |
+| `summarizer_model_id` | `gemini-2.5-flash-lite` | **内容摘要**：将长文本（百科、聊天记录）总结为简洁的背景知识。 | 使用理解和生成能力均衡的模型。 |
+
+**其他主要配置**
 
 ```json
 {
-  "analyzer_provider_id": "",
+  "persona_name": "fairy|仙灵",
+  "classifier_model_id": "gemini-2.5-flash",
+  "filter_model_id": "gemini-2.5-flash-lite",
+  "summarizer_model_id": "gemini-2.5-flash-lite",
   "max_context_length": 2000,
   "moegirl_enabled": true,
   "wikipedia_enabled": true,
   "wikidata_enabled": true,
-  "retrieval": {
-    "text_length_threshold": 500,
-    "max_search_results": 5,
-    "timeout_seconds": 10
-  },
-  "llm_log_enabled": true,
-  "llm_log_max_size_mb": 1
+  "text_length_threshold": 2000,
+  "max_search_results": 3,
+  "timeout_seconds": 10,
+  "llm_log_max_size_mb": 100,
+  "max_history_chars": 50000
 }
 ```
 
@@ -146,6 +158,19 @@ astrbot_plugin_angel_eye/
 3. 同时获取维基百科背景知识
 
 **结果**: AI 提供准确的历史事实和背景信息
+
+### 场景 3: 群聊历史回顾与总结
+
+**用户输入**: "帮我看看最近2小时大家都在聊些什么，总结一下"
+
+**Angel Eye 处理**:
+1. **Classifier** 识别出这是一个关于 `qq_chat_history` 的查询请求。
+2. **Classifier** 提取出关键参数，如 `time_range_hours: 2` 和 `summarize: true`。
+3. **SmartRetriever** 调用 `QQChatHistoryService` 获取最近2小时的聊天记录。
+4. **Summarizer** 将获取到的聊天记录进行提炼和总结。
+5. 最终的摘要作为背景知识注入，供主模型参考。
+
+**结果**: AI 能够对近期群聊内容给出一个简洁的总结，快速跟上话题。
 
 ## 🔧 开发指南
 
