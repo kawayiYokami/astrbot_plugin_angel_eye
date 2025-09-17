@@ -29,15 +29,17 @@ class SmartRetriever:
     - 遵循"宁缺毋滥"原则
     """
 
-    def __init__(self, analyzer_provider: Provider, config: Dict):
+    def __init__(self, filter_provider: Provider, summarizer_provider: Provider, config: Dict):
         """
         初始化智能检索器
 
-        :param analyzer_provider: 用于调用小模型的Provider
+        :param filter_provider: 用于 Filter 角色的 Provider
+        :param summarizer_provider: 用于 Summarizer 角色的 Provider
         :param config: 配置字典
         """
         self.config = config
-        self.analyzer_provider = analyzer_provider
+        self.filter_provider = filter_provider
+        self.summarizer_provider = summarizer_provider
 
         # 从配置中获取参数，使用默认值
         self.TEXT_LENGTH_THRESHOLD = self.config.get("text_length_threshold", 500)
@@ -65,9 +67,9 @@ class SmartRetriever:
     async def retrieve(self, request: KnowledgeRequest, formatted_dialogue: str, event: 'Event') -> KnowledgeResult:
         # 即时初始化子角色和服务
         if self.filter is None:
-            self.filter = Filter(self.analyzer_provider)
+            self.filter = Filter(self.filter_provider)
         if self.summarizer is None:
-            self.summarizer = Summarizer(self.analyzer_provider, self.config)
+            self.summarizer = Summarizer(self.summarizer_provider, self.config)
         if self.qq_history_service is None: # 初始化新的服务
             self.qq_history_service = QQChatHistoryService()
 

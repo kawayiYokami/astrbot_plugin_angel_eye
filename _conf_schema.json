@@ -5,11 +5,23 @@
     "description": "为 Angel Eye 指定一个在对话中使用的专属昵称，以区别于全局唤醒词。多个昵称请用 '|' 分隔。",
     "default": "fairy|仙灵"
   },
-  "analyzer_provider_id": {
+  "classifier_model_id": {
     "type": "string",
-    "title": "分析模型 Provider ID",
-    "description": "用于实体分析和信息摘要的轻量级模型 Provider ID。请确保此模型已在 AstrBot 中正确配置。",
-    "default": "claude-3-haiku"
+    "title": "分类模型 Provider ID",
+    "description": "用于对话意图分析和指令生成的模型。推荐使用高智能模型。",
+    "default": "gemini-2.5-flash-lite"
+  },
+  "filter_model_id": {
+    "type": "string",
+    "title": "筛选模型 Provider ID",
+    "description": "用于从多个搜索结果中筛选最相关内容。推荐使用快速、低成本的模型。",
+    "default": "gemma_27B"
+  },
+  "summarizer_model_id": {
+    "type": "string",
+    "title": "摘要模型 Provider ID",
+    "description": "用于将长文本（如百科页面）总结为简洁的背景知识。推荐使用快速、低成本的模型。。",
+    "default": "gemini-2.5-flash-lite"
   },
   "max_context_length": {
     "type": "int",
@@ -52,12 +64,6 @@
     "title": "请求超时时间",
     "description": "HTTP请求的超时时间（秒）",
     "default": 10
-  },
-  "llm_log_enabled": {
-    "type": "bool",
-    "title": "启用LLM交互日志",
-    "description": "是否记录LLM的一来一回交互日志到本地文件（logs/llm_interactions.log）",
-    "default": true
   },
   "llm_log_max_size_mb": {
     "type": "int",
