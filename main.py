@@ -118,7 +118,7 @@ class AngelEyePlugin(star.Star):
                 persona_name = persona_names_str
 
             # 构建包含身份提醒和背景知识的注入文本
-            injection_text = f"\n\n---\n[系统提醒] 你的名字是 {persona_name}。请根据以下背景知识进行回复。\n\n[背景知识]:\n{background_knowledge}\n---"
+            injection_text = f"\n\n---\n[系统提醒] 你的有如下别名： {persona_name} 请不要对你自己的名字做分析。请根据以下背景知识进行回复。\n\n[背景知识]:\n{background_knowledge}\n---"
 
             logger.info("AngelEye: 步骤 3/3 - 准备注入上下文")
             logger.debug(f"  - 注入的背景知识内容: {background_knowledge}")
