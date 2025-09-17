@@ -9,6 +9,7 @@ from pathlib import Path
 from astrbot.api import logger
 from ..models.request import KnowledgeRequest
 from ..core.exceptions import ParsingError, AngelEyeError
+from ..core.json_parser import safe_extract_json
 
 
 
@@ -77,34 +78,12 @@ class Classifier:
             response_text = response.completion_text
             logger.debug(f"AngelEye[Classifier]: 从分析模型接收的输出:\n---\n{response_text}\n---")
 
-            # 使用分隔符切分思考过程和JSON
-            separator = "---JSON---"
-            if separator not in response_text:
-                logger.warning("AngelEye[Classifier]: 模型输出中未找到分隔符 '---JSON---'")
-                # 尝试直接解析为JSON（向后兼容）
-                json_text = response_text
-                thinking_process = ""
-            else:
-                parts = response_text.split(separator, 1)
-                thinking_process = parts[0].strip()
-                json_text = parts[1].strip()
+            # 使用新的、健壮的JSON解析器
+            response_json = safe_extract_json(response_text)
 
-                # 记录思考过程到日志（用于调试和监控）
-                if thinking_process:
-                    logger.debug(f"AngelEye[Classifier] 思考过程:\n{thinking_process}")
-
-            # 提取JSON字符串
-            json_str_start = json_text.find('{')
-            json_str_end = json_text.rfind('}') + 1
-
-            if json_str_start == -1 or json_str_end <= json_str_start:
-                logger.warning(f"AngelEye[Classifier]: 未找到有效的JSON结构")
+            if response_json is None:
+                logger.warning("AngelEye[Classifier]: 未能从模型响应中提取到有效的JSON。")
                 return None
-
-            json_str = json_text[json_str_start:json_str_end]
-
-            # 解析JSON并创建KnowledgeRequest对象
-            response_json = json.loads(json_str)
 
             # 转换为KnowledgeRequest对象
             request = KnowledgeRequest(

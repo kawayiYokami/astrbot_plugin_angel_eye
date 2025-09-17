@@ -10,6 +10,7 @@ from pathlib import Path
 from astrbot.api import logger
 from ..core.exceptions import ParsingError, AngelEyeError
 from ..core.formatter import format_unified_message
+from ..core.json_parser import safe_extract_json
 
 
 
@@ -100,26 +101,15 @@ class Filter:
             response = await self.provider.text_chat(prompt=final_prompt)
             response_text = response.completion_text
 
-            # --- 开始修改 ---
-            separator = '---JSON---'
-            if separator in response_text:
-                json_part = response_text.split(separator, 1)[1]
-            else:
-                # 降级处理：如果模型忘记输出分隔符，则在整个文本中查找
-                logger.warning("AngelEye[Filter]: 模型输出中未找到'---JSON---'分隔符，将尝试在整个响应中解析。")
-                json_part = response_text
+            # 使用新的、健壮的JSON解析器，并指定必须包含 "selected_title" 字段
+            response_json = safe_extract_json(
+                response_text,
+                required_fields=["selected_title"]
+            )
 
-            json_str_start = json_part.find('{')
-            json_str_end = json_part.rfind('}') + 1
-
-            if json_str_start == -1 or json_str_end <= json_str_start:
-                logger.warning(f"AngelEye[Filter]: 模型未返回有效的JSON结构")
-                logger.debug(f"原始返回: {response_text}")
+            if response_json is None:
+                logger.warning("AngelEye[Filter]: 未能从模型响应中提取到包含'selected_title'的有效JSON。")
                 return None
-
-            json_str = json_part[json_str_start:json_str_end]
-            # --- 结束修改 ---
-            response_json = json.loads(json_str)
 
             selected_title = response_json.get("selected_title")
 
