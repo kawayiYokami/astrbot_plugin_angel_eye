@@ -1,10 +1,13 @@
 # core/cache_manager.py
 
 import asyncio
+import logging
 from diskcache import Cache
 from typing import Optional, Dict, Any
 from collections import defaultdict
-from astrbot.api import logger # 导入上游 logger
+
+# 模块级 logger
+logger = logging.getLogger(__name__)
 
 # 缓存有效期：7天 (604800 秒)
 CACHE_EXPIRATION = 604800
@@ -22,7 +25,7 @@ def init_cache(data_dir: str):
     if _cache is None:
         cache_path = f"{data_dir}/cache"
         _cache = Cache(cache_path, size_limit=256 * 1024 * 1024)
-        logger.info(f"AngelEye: 缓存已在路径 '{cache_path}' 初始化")
+        logger.info(f"AngelEye[CacheManager]: 缓存已在路径 '{cache_path}' 初始化")
 
 def _ensure_cache_initialized():
     """确保缓存已被初始化，否则抛出异常"""
@@ -32,47 +35,32 @@ def _ensure_cache_initialized():
             "Please call init_cache() at plugin startup."
         )
 
-async def get_knowledge(key: str) -> Optional[str]:
+async def get(key: str) -> Optional[Any]:
     """
-    根据唯一的知识键，从缓存中异步获取知识。
+    【统一接口】根据键，从缓存中异步获取任何类型的数据。
     """
     _ensure_cache_initialized()
-    # 将同步IO操作移到线程中执行，避免阻塞事件循环
     value = await asyncio.to_thread(_cache.get, key)
 
-    # 使用asyncio.Lock保护对统计数据的并发写操作
     async with _cache_lock:
         if value is not None:
             _cache_stats["hits"] += 1
+            logger.debug(f"AngelEye[CacheManager]: 缓存命中 (Key: {key})")
         else:
             _cache_stats["misses"] += 1
+            logger.debug(f"AngelEye[CacheManager]: 缓存未命中 (Key: {key})")
     return value
 
-async def set_knowledge(key: str, value: str):
+async def set(key: str, value: Any, expire: int = CACHE_EXPIRATION):
     """
-    将一个知识键和对应的摘要异步存入缓存。
+    【统一接口】将一个键和对应的值（任何类型）异步存入缓存。
     """
     _ensure_cache_initialized()
     try:
-        # 将同步IO操作移到线程中执行
-        await asyncio.to_thread(_cache.set, key, value, expire=CACHE_EXPIRATION)
+        await asyncio.to_thread(_cache.set, key, value, expire=expire)
+        logger.debug(f"AngelEye[CacheManager]: 成功写入缓存 (Key: {key}, Expire: {expire}s)")
     except Exception as e:
-        # 记录错误而不是静默忽略
-        logger.error(f"AngelEye: 写入缓存失败 (key: {key})", exc_info=e)
-
-async def get_object(key: str) -> Optional[Any]:
-    """
-    从缓存中异步获取任意 Python 对象。
-    """
-    _ensure_cache_initialized()
-    return await asyncio.to_thread(_cache.get, key)
-
-async def set_object(key: str, value: Any, expire: int = CACHE_EXPIRATION):
-    """
-    将任意 Python 对象异步存入缓存。
-    """
-    _ensure_cache_initialized()
-    await asyncio.to_thread(_cache.set, key, value, expire=expire)
+        logger.error(f"AngelEye[CacheManager]: 写入缓存失败 (key: {key})", exc_info=e)
 
 def build_doc_key(source: str, entity_name: str) -> str:
     """为文档知识构建缓存键"""
@@ -97,7 +85,7 @@ async def get_cache_stats() -> Dict[str, int]:
     stats.setdefault("misses", 0)
     total = stats["hits"] + stats["misses"]
     if total > 0:
-        stats["hit_rate"] = stats["hits"] / total
+        stats["hit_rate"] = round(stats["hits"] / total, 4)
     else:
         stats["hit_rate"] = 0.0
     return stats
@@ -109,7 +97,3 @@ async def reset_cache_stats():
     async with _cache_lock:
         global _cache_stats
         _cache_stats = defaultdict(int)
-
-# 为了保持向后兼容性，保留旧的导入名
-get_chat_history = get_object
-set_chat_history = set_object
