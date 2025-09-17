@@ -78,6 +78,7 @@ pip install httpx beautifulsoup4 pydantic diskcache
 | :--- | :--- | :--- |
 | `wiki_summarizer_enabled` | `true` | 是否使用AI模型对过长的百科内容进行摘要。关闭后，将直接使用经过基础清洗的原文。 |
 | `chat_summarizer_enabled` | `true` | 是否使用AI模型对QQ聊天记录进行摘要。关闭后，将直接使用原始聊天记录。 |
+| `filter_enabled` | `true` | 在无完全匹配的搜索结果时，是否启用AI模型进行智能筛选。关闭后，只信任完全匹配的结果。 |
 
 ```json
 {
@@ -95,7 +96,8 @@ pip install httpx beautifulsoup4 pydantic diskcache
   "llm_log_max_size_mb": 100,
   "max_history_chars": 50000,
   "wiki_summarizer_enabled": true,
-  "chat_summarizer_enabled": true
+  "chat_summarizer_enabled": true,
+  "filter_enabled": true
 }
 ```
 

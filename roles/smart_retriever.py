@@ -252,7 +252,8 @@ class SmartRetriever:
 
         # Case B: 模糊匹配，调用Filter
         if not selected_entry and len(search_results) > 0:
-            logger.info(f"AngelEye: 无完全匹配，调用Filter从 {len(search_results)} 个结果中筛选...")
+            if self.config.get("filter_enabled", True):
+                logger.info(f"AngelEye: 无完全匹配，调用Filter从 {len(search_results)} 个结果中筛选...")
 
             # 构造候选列表供Filter使用
             candidate_list = [
@@ -281,6 +282,8 @@ class SmartRetriever:
                         selected_pageid = result.get("pageid")
                         logger.info(f"AngelEye: Filter选择了 '{selected_entry}'")
                         break
+            else:
+                logger.info(f"AngelEye: 无完全匹配，但智能筛选功能已禁用。")
 
         # Case C: 无匹配
         if not selected_entry:

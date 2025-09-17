@@ -88,5 +88,11 @@
     "title": "启用聊天记录摘要",
     "description": "是否使用AI模型对QQ聊天记录进行摘要。关闭后，将直接使用原始聊天记录，速度更快但内容更长。",
     "default": true
+  },
+  "filter_enabled": {
+    "type": "bool",
+    "title": "启用智能筛选",
+    "description": "在无完全匹配的搜索结果时，是否启用AI模型进行智能筛选。关闭后，只信任完全匹配的结果。",
+    "default": true
   }
 }
