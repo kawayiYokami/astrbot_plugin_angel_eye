@@ -111,14 +111,19 @@ class AngelEyePlugin(star.Star):
             # 4. 安全上下文注入
             # 从配置中读取 persona_name，如果不存在则使用默认值 'fairy|仙灵'
             persona_names_str = self.config.get("persona_name", "fairy|仙灵")
-            # 如果包含 '|'，则随机选择一个
-            if '|' in persona_names_str:
-                persona_name = random.choice(persona_names_str.split('|')).strip()
-            else:
-                persona_name = persona_names_str
+            all_personas = [name.strip() for name in persona_names_str.split('|')]
+            persona_list_str = "、".join(all_personas)
 
             # 构建包含身份提醒和背景知识的注入文本
-            injection_text = f"\n\n---\n[系统提醒] 你的有如下别名： {persona_name} 请不要对你自己的名字做分析。请根据以下背景知识进行回复。\n\n[背景知识]:\n{background_knowledge}\n---"
+            injection_text = (
+                f"\n\n---\n"
+                f"[系统提醒] 你的别名是 {persona_list_str}。"
+                f"当用户使用这些别名与你对话时，请积极响应。"
+                f"请不要对你自己的名字做分析。"
+                f"请根据以下背景知识进行回复。\n\n"
+                f"[背景知识]:\n{background_knowledge}\n"
+                f"---"
+            )
 
             logger.info("AngelEye: 步骤 3/3 - 准备注入上下文")
             logger.debug(f"  - 注入的背景知识内容: {background_knowledge}")
