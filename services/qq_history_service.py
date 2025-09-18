@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, TYPE_CHECKING
 
 from astrbot.api import logger
-from ..core.cache_manager import get, set
+from ..core.cache_manager import get, set as set_cache
 from ..core.formatter import format_unified_message # 导入新的格式化工具
 
 if TYPE_CHECKING:
@@ -55,7 +55,7 @@ class QQChatHistoryService:
         messages: List[Dict] = []
 
         # 从缓存加载，并填充 processed_ids 和 messages
-        cached_raw_messages: List[Dict] = await get_chat_history(cache_key) or []
+        cached_raw_messages: List[Dict] = await get(cache_key) or []
         if cached_raw_messages:
             messages.extend(cached_raw_messages)
             processed_ids.update(msg.get("message_id") for msg in cached_raw_messages)
@@ -226,7 +226,7 @@ class QQChatHistoryService:
         sorted_messages = sorted(messages, key=lambda m: m.get('time', 0))
         
         # 将这个全新的、最完整的列表，完整地写回本地缓存
-        await set_chat_history(cache_key, sorted_messages)
+        await set_cache(cache_key, sorted_messages)
 
         # --- 格式化并返回 ---
         formatted_messages = []
