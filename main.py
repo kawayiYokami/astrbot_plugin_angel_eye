@@ -117,11 +117,9 @@ class AngelEyePlugin(star.Star):
             # 构建包含身份提醒和背景知识的注入文本
             injection_text = (
                 f"\n\n---\n"
-                f"[系统提醒] 你的别名是 {persona_list_str}。"
-                f"当用户使用这些别名与你对话时，请积极响应。"
-                f"请不要对你自己的名字做分析。"
-                f"请根据以下背景知识进行回复。\n\n"
-                f"[背景知识]:\n{background_knowledge}\n"
+                f"[天使之眼] 我的别名是 {persona_list_str}。"
+                f"如下是我脑海中浮现出的上下文可能相关的信息，仅作参考。\n\n"
+                f"[相关信息参考]:\n{background_knowledge}\n"
                 f"---"
             )
 
