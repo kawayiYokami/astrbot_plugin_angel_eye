@@ -5,7 +5,8 @@
 
 from typing import List, Optional, Dict
 from .base_client import BaseWikiClient
-from astrbot.api import logger
+import logging
+logger = logging.getLogger(__name__)
 
 
 class MoegirlClient(BaseWikiClient):

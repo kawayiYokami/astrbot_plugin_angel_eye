@@ -3,7 +3,8 @@
 提供用于函数输入的装饰器
 """
 from functools import wraps
-from astrbot.api import logger
+import logging
+logger = logging.getLogger(__name__)
 from .exceptions import ValidationError
 
 

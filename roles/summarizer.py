@@ -6,7 +6,8 @@ from typing import Optional, Dict
 from pathlib import Path
 
 
-from astrbot.api import logger
+import logging
+logger = logging.getLogger(__name__)
 from ..core.exceptions import AngelEyeError
 
 

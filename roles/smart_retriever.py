@@ -6,7 +6,8 @@ import json
 from typing import List, Dict, Optional, Any
 from astrbot.api.provider import Provider
 
-from astrbot.api import logger
+import logging
+logger = logging.getLogger(__name__)
 from ..models.request import KnowledgeRequest
 from ..models.knowledge import KnowledgeChunk, KnowledgeResult
 from ..clients.wikipedia_client import WikipediaClient
