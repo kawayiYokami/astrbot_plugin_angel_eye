@@ -6,7 +6,7 @@ import httpx
 import asyncio
 from typing import List, Dict, Optional, Set, Any, Tuple
 import logging
-from core.cache_manager import async_cache
+from ..core.cache_manager import async_cache
 logger = logging.getLogger(__name__)
 
 
