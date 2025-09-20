@@ -5,6 +5,8 @@ import logging
 from diskcache import Cache
 from typing import Optional, Dict, Any
 from collections import defaultdict
+from functools import wraps
+import json
 
 # 模块级 logger
 logger = logging.getLogger(__name__)
@@ -97,3 +99,37 @@ async def reset_cache_stats():
     async with _cache_lock:
         global _cache_stats
         _cache_stats = defaultdict(int)
+
+
+def async_cache(key_prefix: str):
+    """
+    一个通用的异步函数缓存装饰器。
+    
+    :param key_prefix: 缓存键的前缀，用于区分不同函数的缓存。
+    """
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # 1. 根据函数名和所有参数，自动生成一个唯一的缓存键
+            #    例如: "wikidata:search_entity:('苹果',):{}"
+            #    注意：args[0] 是 'self'，我们通常跳过它以避免实例相关性
+            arg_str = json.dumps(args[1:], sort_keys=True, default=str)
+            kwarg_str = json.dumps(kwargs, sort_keys=True, default=str)
+            cache_key = f"{key_prefix}:{arg_str}:{kwarg_str}"
+
+            # 2. 检查缓存
+            cached_value = await get(cache_key)
+            if cached_value is not None:
+                logger.debug(f"命中装饰器缓存 (Key: {cache_key})")
+                return cached_value
+
+            # 3. 如果未命中，则执行原始被包装的函数
+            result = await func(*args, **kwargs)
+
+            # 4. 将结果写入缓存
+            if result is not None:
+                await set(cache_key, result)
+            
+            return result
+        return wrapper
+    return decorator

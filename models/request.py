@@ -19,6 +19,10 @@ class KnowledgeRequest(BaseModel):
         default_factory=list,
         description="需要查询的结构化事实，格式为'实体名.属性名'"
     )
+    fact_query_plan: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="V5格式的结构化事实查询计划，包含targets和filter_keywords_en"
+    )
     parameters: Dict[str, Any] = Field(
         default_factory=dict,
         description="来自Classifier的额外参数，例如 time_range_days 或 message_count"
