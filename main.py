@@ -35,7 +35,7 @@ class AngelEyePlugin(star.Star):
         data_dir = str(StarTools.get_data_dir())
         cache_manager.init_cache(data_dir)
 
-    @filter.on_llm_request(priority=100)
+    @filter.on_llm_request(priority=-50)
     async def enrich_context_before_llm_call(self, event: AstrMessageEvent, req: ProviderRequest):
         """
         在主模型请求前，执行上下文增强逻辑
