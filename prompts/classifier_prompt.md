@@ -16,7 +16,9 @@
 
 在分隔符 `---JSON---` 之后，我必须输出一个严格的JSON对象，不包含任何其他文本。该JSON对象包含以下字段：
 *   `required_docs` (对象): 一个键值对。键是实体名称，值是建议的数据源 (`"wikipedia"`, `"moegirl"` 或 `"qq_chat_history"`)。
-*   `required_facts` (数组): 一个字符串数组，每个字符串都遵循 `'实体名.属性名'` 的格式。
+*   `required_facts` (字符串数组, 可选): 一个包含结构化事实查询指令的字符串列表。数组中的每个字符串都遵循 `[可选消歧义关键词].实体名.属性名` 的格式。
+    *   **规则1**: 方括号 `[]` 内的消歧义关键词**必须**是纯英文，并用 `|` 分隔。
+    *   **规则2**: 为了提高查询成功率，对于每一个需要查询的事实，如果可能，请**同时提供中文和英文两个版本**的查询字符串。它们可以共享相同的英文上下文。
 *   `parameters` (对象, 可选): 当 `required_docs` 中包含 `"qq_chat_history"` 时，此字段必须存在。它包含用于获取聊天记录的参数。
     *   `time_range_hours` (数字, 可选): 根据用户的**时间描述**（如“一小时前”、“今天下午3点到现在”）解析出的小时数。
     *   `message_count` (数字, 可选): 根据用户的**数量描述**（如“最近100条”、“50条消息”）解析出的消息条数。
@@ -42,8 +44,10 @@
 {
   "required_docs": {},
   "required_facts": [
-    "朱祁镇.父亲",
-    "朱祁镇.出生日期"
+    "[person|emperor|ming dynasty].朱祁镇.父亲",
+    "[person|emperor|ming dynasty].Zhu Qizhen.father",
+    "[person|emperor|ming dynasty].朱祁镇.出生日期",
+    "[person|emperor|ming dynasty].Zhu Qizhen.date of birth"
   ],
   "parameters": {}
 }
@@ -86,7 +90,8 @@
     "苹果公司": "wikipedia"
   },
   "required_facts": [
-    "苹果公司.创始人"
+    "[company|technology|mobile].苹果公司.创始人",
+    "[company|technology|mobile].Apple Inc.founder"
   ],
   "parameters": {}
 }

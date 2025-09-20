@@ -89,7 +89,7 @@ class SmartRetriever:
             logger.info(f"AngelEye: 开始处理 {len(request.required_facts)} 个事实查询...")
             fact_chunks = await self._process_facts(request.required_facts)
             result.chunks.extend(fact_chunks)
-
+            
             # 如果只有事实查询，没有文档查询，直接返回
             if not request.required_docs:
                 logger.info("AngelEye: 仅事实查询，处理完成")
@@ -125,84 +125,54 @@ class SmartRetriever:
 
     async def _process_facts(self, required_facts: List[str]) -> List[KnowledgeChunk]:
         """
-        处理结构化事实查询
+        处理结构化事实查询 (新格式: [context].entity.property)
 
-        :param required_facts: 事实列表，格式为 "实体名.属性名"
+        :param required_facts: 事实列表，每个元素是 "[context].entity.property" 或 "entity.property" 格式的字符串
         :return: 知识片段列表
         """
+        import asyncio
+        import re
+
+        # 1. 将每个事实字符串解析成一个 query_plan 对象
+        query_plans = []
+        for fact_str in required_facts:
+            match = re.match(r"\[([^\]]+)\]\.(.+)", fact_str)
+            if match:
+                # 格式: [context].entity.property
+                keywords = match.group(1)
+                targets = match.group(2)
+                query_plans.append({"targets": targets, "filter_keywords_en": keywords})
+            else:
+                # 格式: entity.property
+                query_plans.append({"targets": fact_str, "filter_keywords_en": ""})
+
+        # 2. 并发执行所有查询计划
+        if not query_plans:
+            return []
+        
+        tasks = [self.wikidata_client.execute_query(plan) for plan in query_plans]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 3. 将返回的结果格式化为 KnowledgeChunk 列表
         chunks = []
-
-        # 按实体分组事实
-        entity_facts_map = {}
-        for fact in required_facts:
-            parts = fact.split(".", 1)
-            if len(parts) != 2:
-                logger.warning(f"AngelEye[SmartRetriever]: 无效的事实格式 '{fact}'，跳过")
+        for i, res in enumerate(results):
+            if isinstance(res, Exception):
+                logger.error(f"查询 '{required_facts[i]}' 时出错: {res}")
                 continue
-
-            entity_name, fact_name = parts
-            if entity_name not in entity_facts_map:
-                entity_facts_map[entity_name] = []
-            entity_facts_map[entity_name].append(fact_name)
-
-        # 批量查询每个实体的事实
-        for entity_name, fact_names in entity_facts_map.items():
-            # 1. 为该实体的所有事实构建一个组合缓存键
-            # 注意：这里我们为一组事实创建一个缓存项，以减少I/O
-            facts_to_fetch = []
-            combined_content_lines = []
-
-            for fact_name in fact_names:
-                fact_query = f"{entity_name}.{fact_name}"
-                cache_key = build_fact_key(fact_query)
-                cached_value = await get(cache_key)
-                if cached_value:
-                    logger.debug(f"AngelEye: 命中事实缓存 (Key: {cache_key})")
-                    combined_content_lines.append(f"- {fact_name}: {cached_value}")
-                else:
-                    facts_to_fetch.append(fact_name)
-
-            # 如果有缓存内容，先添加到结果中
-            if combined_content_lines:
+            
+            final_facts = res.get("final_facts", {})
+            if final_facts:
+                content_lines = [f"- {name}: {value}" for name, value in final_facts.items()]
+                # 从 targets 中提取实体名 (支持 | 分隔的多个目标)
+                entity_name = query_plans[i]['targets'].split('.')[0].split('|')[0].strip()
                 chunks.append(KnowledgeChunk(
                     source="wikidata",
                     entity=entity_name,
-                    content="\n".join(combined_content_lines)
+                    content="\n".join(content_lines)
                 ))
-
-            # 如果所有事实都已命中缓存，则跳过网络请求
-            if not facts_to_fetch:
-                continue
-
-            logger.info(f"AngelEye: 事实缓存未命中，将为 '{entity_name}' 查询 {len(facts_to_fetch)} 个事实。")
-
-            try:
-                facts = await self.wikidata_client.query_facts(entity_name, facts_to_fetch)
-                if facts:
-                    fact_lines = []
-                    for fact_name, fact_value in facts.items():
-                        if fact_value is not None:
-                            fact_lines.append(f"- {fact_name}: {fact_value}")
-
-                            # 2. 将新获取的事实存入缓存
-                            fact_query = f"{entity_name}.{fact_name}"
-                            cache_key = build_fact_key(fact_query)
-                            logger.debug(f"AngelEye: 将新事实存入缓存 (Key: {cache_key})")
-                            # 注意：只缓存值，而不是 "key: value" 字符串
-                            await set(cache_key, str(fact_value))
-
-                    if fact_lines:
-                        chunks.append(KnowledgeChunk(
-                            source="wikidata",
-                            entity=entity_name,
-                            content="\n".join(fact_lines)
-                        ))
-                        logger.info(f"AngelEye: 成功获取 '{entity_name}' 的 {len(fact_lines)} 个事实")
-
-            except Exception as e:
-                logger.error(f"AngelEye: 查询 '{entity_name}' 的事实时出错: {e}")
-
+        
         return chunks
+
 
     async def _process_document(self, entity_name: str, source: str, formatted_dialogue: str, event: 'Event') -> Optional[KnowledgeChunk]:
         """
