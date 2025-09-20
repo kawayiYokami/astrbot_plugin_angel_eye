@@ -249,11 +249,9 @@ class WikidataClient:
                                 logger.debug(f"AngelEye[WikidataClient]: 获取到事实 '{prop_display_name}': {final_value_str}")
                             else:
                                 prop_display_name = prop_info.get("label", prop_id)
-                                results["final_facts"][prop_display_name] = None
                                 logger.debug(f"AngelEye[WikidataClient]: 实体 '{best_entity.get('label')}' 的属性 '{prop_display_name}' 未解析出有效值。")
                         else:
                             prop_display_name = prop_info.get("label", prop_id)
-                            results["final_facts"][prop_display_name] = None
                             logger.debug(f"AngelEye[WikidataClient]: 实体 '{best_entity.get('label')}' 没有属性 '{prop_display_name}' (ID: {prop_id}) 的声明。")
                 else:
                     logger.warning(f"AngelEye[WikidataClient]: 实体详情中未找到实体 '{entity_qid}' 的数据。")
@@ -589,7 +587,6 @@ class WikidataClient:
         for fact_name, pid in fact_name_to_pid.items():
             claim_list = claims.get(pid)
             if not claim_list:
-                results[fact_name] = None
                 continue
 
             # 取第一个声明的值
