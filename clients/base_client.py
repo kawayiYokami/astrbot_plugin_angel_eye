@@ -6,7 +6,8 @@ import httpx
 from typing import Dict, Optional, List
 from abc import ABC, abstractmethod
 
-from astrbot.api import logger
+import logging
+logger = logging.getLogger(__name__)
 
 
 

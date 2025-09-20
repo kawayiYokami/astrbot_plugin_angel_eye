@@ -6,7 +6,8 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, TYPE_CHECKING
 
-from astrbot.api import logger
+import logging
+logger = logging.getLogger(__name__)
 from ..core.cache_manager import get, set as set_cache
 from ..core.formatter import format_unified_message # 导入新的格式化工具
 

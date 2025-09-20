@@ -7,7 +7,8 @@ import json
 from typing import List, Dict, Optional
 from pathlib import Path
 
-from astrbot.api import logger
+import logging
+logger = logging.getLogger(__name__)
 from ..core.exceptions import ParsingError, AngelEyeError
 from ..core.formatter import format_unified_message
 from ..core.json_parser import safe_extract_json
