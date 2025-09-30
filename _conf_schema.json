@@ -2,97 +2,97 @@
   "persona_name": {
     "type": "string",
     "title": "AI 昵称",
-    "description": "为 Angel Eye 指定一个在对话中使用的专属昵称，以区别于全局唤醒词。多个昵称请用 '|' 分隔。",
+    "description": "插件专属昵称，多个用'|'分隔",
     "default": "fairy|仙灵"
   },
   "classifier_model_id": {
     "type": "string",
     "title": "分类模型 Provider ID",
-    "description": "用于对话意图分析和指令生成的模型。推荐使用高智能模型。",
+    "description": "对话意图分析模型ID",
     "default": "gemini-2.5-flash-lite"
   },
   "filter_model_id": {
     "type": "string",
     "title": "筛选模型 Provider ID",
-    "description": "用于从多个搜索结果中筛选最相关内容。推荐使用快速、低成本的模型。",
+    "description": "搜索结果筛选模型ID",
     "default": "gemma_27B"
   },
   "summarizer_model_id": {
     "type": "string",
     "title": "摘要模型 Provider ID",
-    "description": "用于将长文本（如百科页面）总结为简洁的背景知识。推荐使用快速、低成本的模型。。",
+    "description": "长文本摘要模型ID",
     "default": "gemini-2.5-flash-lite"
   },
-  "max_context_length": {
+  "max_context_tokens_k": {
     "type": "int",
-    "title": "最大上下文长度",
-    "description": "传递给分析模型进行上下文理解的最大字符长度。过长的上下文可能影响分析效率。",
-    "default": 2000
+    "title": "最大上下文长度 (K tokens)",
+    "description": "摘要模型最大上下文长度(K tokens)",
+    "default": 100
   },
   "moegirl_enabled": {
     "type": "bool",
     "title": "启用萌娘百科",
-    "description": "是否在知识检索时使用萌娘百科 (zh.moegirl.org.cn)。",
+    "description": "启用萌娘百科数据源",
     "default": true
   },
   "wikipedia_enabled": {
     "type": "bool",
     "title": "启用维基百科",
-    "description": "是否在知识检索时使用中文维基百科 (zh.wikipedia.org)。",
+    "description": "启用维基百科数据源",
     "default": true
   },
   "wikidata_enabled": {
     "type": "bool",
     "title": "启用维基数据",
-    "description": "是否在知识检索时使用维基数据 (www.wikidata.org) 进行结构化事实查询。",
+    "description": "启用维基数据事实查询",
     "default": true
   },
   "text_length_threshold": {
     "type": "int",
     "title": "文本长度阈值",
-    "description": "决定是否调用AI进行归纳的文本长度阈值（字符数）",
+    "description": "触发AI摘要的字符数阈值",
     "default": 2000
   },
   "max_search_results": {
     "type": "int",
     "title": "最大搜索结果数",
-    "description": "搜索时返回的最大结果数量",
+    "description": "单次搜索最大返回数量",
     "default": 3
   },
   "timeout_seconds": {
     "type": "int",
     "title": "请求超时时间",
-    "description": "HTTP请求的超时时间（秒）",
+    "description": "HTTP请求超时秒数",
     "default": 10
   },
   "llm_log_max_size_mb": {
     "type": "int",
     "title": "LLM日志最大尺寸(MB)",
-    "description": "LLM交互日志文件的最大尺寸（MB），超过后会自动滚动",
+    "description": "LLM日志文件最大MB数",
     "default": 100
   },
-  "max_history_chars": {
+  "max_history_tokens_k": {
     "type": "int",
-    "title": "最大聊天历史字符数",
-    "description": "在传递给分析模型进行QQ聊天历史摘要前，截取的最近聊天记录的最大字符数。",
-    "default": 50000
+    "title": "最大聊天历史 (K tokens)",
+    "description": "QQ聊天历史最大上下文(K tokens)",
+    "default": 50
   },
   "wiki_summarizer_enabled": {
     "type": "bool",
     "title": "启用百科内容摘要",
-    "description": "是否使用AI模型对过长的百科内容进行摘要。关闭后，将直接使用经过基础清洗的原文，速度更快但内容更长。",
+    "description": "启用百科内容AI摘要",
     "default": true
   },
   "chat_summarizer_enabled": {
     "type": "bool",
     "title": "启用聊天记录摘要",
-    "description": "是否使用AI模型对QQ聊天记录进行摘要。关闭后，将直接使用原始聊天记录，速度更快但内容更长。",
+    "description": "启用聊天记录AI摘要",
     "default": true
   },
   "filter_enabled": {
     "type": "bool",
     "title": "启用智能筛选",
-    "description": "在无完全匹配的搜索结果时，是否启用AI模型进行智能筛选。关闭后，只信任完全匹配的结果。",
+    "description": "启用搜索结果AI筛选",
     "default": true
   }
 }

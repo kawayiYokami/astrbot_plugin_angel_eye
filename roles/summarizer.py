@@ -5,7 +5,7 @@ Angel Eye 插件 - 摘要员角色 (Summarizer)
 from typing import Optional, Dict
 from pathlib import Path
 
-
+import tiktoken
 import logging
 logger = logging.getLogger(__name__)
 from ..core.exceptions import AngelEyeError
@@ -25,8 +25,17 @@ class Summarizer:
         """
         self.provider = provider
         self.config = config
-        self.max_context_length = self.config.get("max_context_length", 2000)
-        self.max_history_chars = self.config.get("max_history_chars", 50000)
+        max_tokens_k = self.config.get("max_context_tokens_k", 100)
+        self.max_tokens = max_tokens_k * 1024
+        max_history_tokens_k = self.config.get("max_history_tokens_k", 50)
+        self.max_history_tokens = max_history_tokens_k * 1024
+
+        # 初始化tiktoken编码器
+        try:
+            self.encoding = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            logger.warning("AngelEye[Summarizer]: tiktoken 初始化失败，不进行内容截断。")
+            self.encoding = None
 
         # 预加载所有 prompt 模板
         self.wiki_prompt_template = self._load_prompt("summarizer_prompt.md")
@@ -62,7 +71,16 @@ class Summarizer:
         if source in ["wikipedia", "moegirl"]:
             prompt_template = self.wiki_prompt_template
             # 截断内容以符合模型上下文限制
-            content_to_summarize = full_content[:self.max_context_length]
+            if self.encoding:
+                tokens = self.encoding.encode(full_content)
+                if len(tokens) > self.max_tokens:
+                    truncated_tokens = tokens[:self.max_tokens]
+                    content_to_summarize = self.encoding.decode(truncated_tokens)
+                else:
+                    content_to_summarize = full_content
+            else:
+                # 若tiktoken初始化失败，不进行内容截断
+                content_to_summarize = full_content
             final_prompt = prompt_template.format(
                 full_content=content_to_summarize,
                 entity_name=entity_name,
@@ -71,10 +89,17 @@ class Summarizer:
         elif source == "qq_chat_history":
             prompt_template = self.chat_prompt_template
             # 聊天记录的 prompt 可能需要不同的变量和长度控制
-            if len(full_content) > self.max_history_chars:
-                full_content = f"...(部分历史记录已省略)...\n{full_content[-self.max_history_chars:]}"
+            content_to_summarize = full_content
+            if self.encoding:
+                tokens = self.encoding.encode(full_content)
+                if len(tokens) > self.max_history_tokens:
+                    # 从列表末尾截取，保留最新的 tokens
+                    truncated_tokens = tokens[-self.max_history_tokens:]
+                    content_to_summarize = self.encoding.decode(truncated_tokens)
+                    # 为了明确告知模型信息被截断，可以添加提示
+                    content_to_summarize = f"...(部分历史记录已省略)...\n{content_to_summarize}"
             final_prompt = prompt_template.format(
-                historical_chat=full_content,
+                historical_chat=content_to_summarize,
                 latest_dialogue=dialogue
             )
         else:
