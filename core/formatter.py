@@ -4,11 +4,80 @@ Angel Eye 插件 - 消息格式化工具
 """
 from __future__ import annotations
 import re
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any
 
 # 定义北京时间时区
 BEIJING_TZ = timezone(timedelta(hours=8))
+
+def format_angelheart_message(message_dict: Dict[str, Any]) -> str:
+    """
+    将天使之心提供的消息字典格式化为可读文本
+    保留完整的ID、昵称和时间信息
+    
+    Args:
+        message_dict (Dict): 天使之心提供的消息字典
+        
+    Returns:
+        str: 格式化后的字符串，例如：
+             "[群友: 小明 (ID: 123456)] (刚刚)\n你好，今天天气怎么样？"
+    """
+    try:
+        role = message_dict.get("role", "unknown")
+        content = message_dict.get("content", "")
+        sender_id = message_dict.get("sender_id", "Unknown")
+        sender_name = message_dict.get("sender_name", "成员")
+        timestamp = message_dict.get("timestamp", 0)
+        
+        # 转换内容为字符串
+        if isinstance(content, list):
+            # 处理多模态内容
+            text_parts = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    text_content = item.get("text", "")
+                    if text_content:
+                        text_parts.append(text_content)
+            content = "".join(text_parts).strip()
+        elif not isinstance(content, str):
+            content = str(content)
+        
+        # 格式化相对时间
+        relative_time_str = ""
+        if timestamp:
+            current_time = time.time()
+            delta = current_time - timestamp
+            
+            if delta < 0:
+                relative_time_str = ""
+            elif delta < 60:
+                relative_time_str = " (刚刚)"
+            elif delta < 3600:
+                minutes = int(delta / 60)
+                relative_time_str = f" ({minutes}分钟前)"
+            elif delta < 86400:  # 24小时
+                hours = int(delta / 3600)
+                relative_time_str = f" ({hours}小时前)"
+            else:
+                days = int(delta / 86400)
+                relative_time_str = f" ({days}天前)"
+        
+        # 根据角色确定显示格式
+        if role == "assistant":
+            # 助理消息格式
+            return f"[助理: {sender_name}]{relative_time_str}\n{content}"
+        elif role == "user":
+            # 用户消息格式
+            return f"[群友: {sender_name} (ID: {sender_id})]{relative_time_str}\n{content}"
+        else:
+            # 其他角色
+            return f"[{role}: {sender_name}]{relative_time_str}\n{content}"
+            
+    except Exception as e:
+        # 发生错误时返回错误标识
+        return f"[格式化错误] 无法处理天使之心消息: {str(e)}"
+
 
 def format_unified_message(message_dict: Dict[str, Any], self_id: str = None) -> str:
     """
