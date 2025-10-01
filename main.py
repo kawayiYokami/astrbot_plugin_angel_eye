@@ -17,7 +17,7 @@ from .core.exceptions import AngelEyeError
 from .roles.smart_retriever import SmartRetriever
 from .roles.classifier import Classifier
 from .roles.summarizer import Summarizer
-from .core.formatter import format_unified_message
+from .core.formatter import format_unified_message, format_angelheart_message
 
 
 class AngelEyePlugin(star.Star):
@@ -34,6 +34,62 @@ class AngelEyePlugin(star.Star):
         # 初始化缓存管理器
         data_dir = str(StarTools.get_data_dir())
         cache_manager.init_cache(data_dir)
+
+    def _get_dialogue_records(self, event: AstrMessageEvent, req_contexts: list, original_prompt: str) -> list:
+        """
+        获取对话记录的统一方法
+        优先使用天使之心提供的上下文，如果没有则使用现有逻辑
+        
+        Args:
+            event: AstrMessageEvent 事件对象
+            req_contexts: 请求上下文列表
+            original_prompt: 原始提示词
+            
+        Returns:
+            list: 格式化后的对话记录列表，如果不需要搜索则返回空列表
+        """
+        # 1. 检查是否存在天使之心上下文
+        if hasattr(event, 'angelheart_context'):
+            try:
+                context = json.loads(event.angelheart_context)
+                
+                # 检查是否需要搜索
+                needs_search = context.get('needs_search', False)
+                if not needs_search:
+                    logger.info("AngelEye: 天使之心指示不需要搜索，跳过知识检索")
+                    return []
+                
+                # 使用专门的天使之心格式化工具处理聊天记录
+                chat_records = context.get('chat_records', [])
+                formatted_records = []
+                for record in chat_records:
+                    formatted_record = format_angelheart_message(record)
+                    formatted_records.append(formatted_record)
+                
+                logger.info(f"AngelEye: 使用天使之心上下文，记录数: {len(formatted_records)}")
+                return formatted_records
+                
+            except json.JSONDecodeError as e:
+                logger.warning(f"AngelEye: 解析天使之心上下文失败: {e}")
+            except Exception as e:
+                logger.warning(f"AngelEye: 处理天使之心上下文时发生错误: {e}")
+        
+        # 2. 如果没有天使之心上下文，使用现有逻辑构建对话记录
+        dialogue_parts = []
+        for item in req_contexts:
+            dialogue_parts.append(format_unified_message(item))
+        
+        # 处理当前消息
+        current_message_dict = {
+            "role": "user",
+            "content": original_prompt
+        }
+        dialogue_parts.append(format_unified_message(current_message_dict))
+        
+        formatted_dialogue = "\n".join(dialogue_parts)
+        logger.info(f"AngelEye: 使用现有逻辑构建对话记录，记录数: {len(dialogue_parts)}")
+        
+        return [formatted_dialogue]
 
     @filter.on_llm_request(priority=-50)
     async def enrich_context_before_llm_call(self, event: AstrMessageEvent, req: ProviderRequest):
@@ -67,7 +123,15 @@ class AngelEyePlugin(star.Star):
         original_prompt = req.prompt
 
         try:
-            # 1. 调用Classifier生成轻量级知识请求指令
+            # 1. 获取对话记录（统一处理天使之心上下文和现有逻辑）
+            dialogue_records = self._get_dialogue_records(event, req.contexts, original_prompt)
+            
+            # 如果对话记录为空（天使之心指示不需要搜索），直接返回
+            if not dialogue_records:
+                logger.info("AngelEye: 无需补充知识，流程结束。")
+                return
+
+            # 2. 调用Classifier生成轻量级知识请求指令
             knowledge_request = await classifier.get_knowledge_request(req.contexts, original_prompt)
             logger.info(f"AngelEye: 步骤 1/3 - 分类器分析完成")
             logger.debug(f"  - 分类结果 (KnowledgeRequest): {knowledge_request}")
@@ -77,18 +141,9 @@ class AngelEyePlugin(star.Star):
                 logger.info("AngelEye: 无需补充知识，流程结束。")
                 return
 
-            # 1.5. 格式化对话历史，供 Summarizer 使用
-            # 将 astrbot 上下文转换为统一格式
-            dialogue_parts = []
-            for item in req.contexts:
-                dialogue_parts.append(format_unified_message(item))
-            # 处理当前消息
-            current_message_dict = {
-                "role": "user",
-                "content": original_prompt
-            }
-            dialogue_parts.append(format_unified_message(current_message_dict))
-            formatted_dialogue = "\n".join(dialogue_parts)
+            # 3. 格式化对话历史，供 Summarizer 使用
+            # 使用统一的对话记录
+            formatted_dialogue = "\n".join(dialogue_records)
 
             # 2. 调用SmartRetriever执行智能知识检索
             knowledge_result = await smart_retriever.retrieve(knowledge_request, formatted_dialogue, event) # 传入 event 参数
