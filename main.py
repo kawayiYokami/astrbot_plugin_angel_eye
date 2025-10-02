@@ -98,21 +98,45 @@ class AngelEyePlugin(star.Star):
         这是 Angel Eye 的核心入口点，使用新的智能知识获取架构
         """
         # 在事件处理时即时获取三个独立的 Provider
-        classifier_model_id = self.config.get("classifier_model_id", "claude-3-sonnet")
-        filter_model_id = self.config.get("filter_model_id", "claude-3-haiku")
-        summarizer_model_id = self.config.get("summarizer_model_id", "claude-3-haiku")
+        classifier_model_id = self.config.get("classifier_model_id")
+        filter_model_id = self.config.get("filter_model_id")
+        summarizer_model_id = self.config.get("summarizer_model_id")
 
-        classifier_provider: Provider = self.context.get_provider_by_id(classifier_model_id)
-        filter_provider: Provider = self.context.get_provider_by_id(filter_model_id)
-        summarizer_provider: Provider = self.context.get_provider_by_id(summarizer_model_id)
+        # 检查必需的模型配置
+        required_model_configs = {
+            "classifier_model_id": classifier_model_id,
+            "filter_model_id": filter_model_id,
+            "summarizer_model_id": summarizer_model_id
+        }
 
-        # 健壮性检查
+        missing_configs = [key for key, value in required_model_configs.items() if not value]
+        if missing_configs:
+            logger.info(f"AngelEye: 未设置模型配置: {', '.join(missing_configs)}，跳过上下文增强")
+            return
+
+        # 检查是否启用了任何数据源
+        data_sources_enabled = (
+            self.config.get("moegirl_enabled", False) or
+            self.config.get("wikipedia_enabled", False) or
+            self.config.get("wikidata_enabled", False)
+        )
+
+        if not data_sources_enabled:
+            logger.info("AngelEye: 未启用任何数据源，跳过上下文增强")
+            return
+
+        # 安全地获取Provider
+        classifier_provider = self.context.get_provider_by_id(classifier_model_id) if classifier_model_id else None
+        filter_provider = self.context.get_provider_by_id(filter_model_id) if filter_model_id else None
+        summarizer_provider = self.context.get_provider_by_id(summarizer_model_id) if summarizer_model_id else None
+
+        # 验证Provider可用性
         if not all([classifier_provider, filter_provider, summarizer_provider]):
             missing = []
             if not classifier_provider: missing.append(f"分类模型({classifier_model_id})")
             if not filter_provider: missing.append(f"筛选模型({filter_model_id})")
             if not summarizer_provider: missing.append(f"摘要模型({summarizer_model_id})")
-            logger.warning(f"AngelEye: 以下必要的模型未找到或未配置，跳过上下文增强: {', '.join(missing)}")
+            logger.info(f"AngelEye: 以下模型未找到，跳过上下文增强: {', '.join(missing)}")
             return
 
         # 在每次请求时创建新的角色实例，避免状态污染
