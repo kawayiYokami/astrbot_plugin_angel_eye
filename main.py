@@ -39,12 +39,12 @@ class AngelEyePlugin(star.Star):
         """
         获取对话记录的统一方法
         优先使用天使之心提供的上下文，如果没有则使用现有逻辑
-        
+
         Args:
             event: AstrMessageEvent 事件对象
             req_contexts: 请求上下文列表
             original_prompt: 原始提示词
-            
+
         Returns:
             list: 格式化后的对话记录列表，如果不需要搜索则返回空列表
         """
@@ -52,43 +52,43 @@ class AngelEyePlugin(star.Star):
         if hasattr(event, 'angelheart_context'):
             try:
                 context = json.loads(event.angelheart_context)
-                
+
                 # 检查是否需要搜索
                 needs_search = context.get('needs_search', False)
                 if not needs_search:
                     logger.info("AngelEye: 天使之心指示不需要搜索，跳过知识检索")
                     return []
-                
+
                 # 使用专门的天使之心格式化工具处理聊天记录
                 chat_records = context.get('chat_records', [])
                 formatted_records = []
                 for record in chat_records:
                     formatted_record = format_angelheart_message(record)
                     formatted_records.append(formatted_record)
-                
+
                 logger.info(f"AngelEye: 使用天使之心上下文，记录数: {len(formatted_records)}")
                 return formatted_records
-                
+
             except json.JSONDecodeError as e:
                 logger.warning(f"AngelEye: 解析天使之心上下文失败: {e}")
             except Exception as e:
                 logger.warning(f"AngelEye: 处理天使之心上下文时发生错误: {e}")
-        
+
         # 2. 如果没有天使之心上下文，使用现有逻辑构建对话记录
         dialogue_parts = []
         for item in req_contexts:
             dialogue_parts.append(format_unified_message(item))
-        
+
         # 处理当前消息
         current_message_dict = {
             "role": "user",
             "content": original_prompt
         }
         dialogue_parts.append(format_unified_message(current_message_dict))
-        
+
         formatted_dialogue = "\n".join(dialogue_parts)
         logger.info(f"AngelEye: 使用现有逻辑构建对话记录，记录数: {len(dialogue_parts)}")
-        
+
         return [formatted_dialogue]
 
     @filter.on_llm_request(priority=-50)
@@ -97,6 +97,37 @@ class AngelEyePlugin(star.Star):
         在主模型请求前，执行上下文增强逻辑
         这是 Angel Eye 的核心入口点，使用新的智能知识获取架构
         """
+        # ==================== 新增前置检查逻辑 START ====================
+
+        # 1. 检查 is_at_or_wake_command
+        if not event.is_at_or_wake_command:
+            return
+
+        message_outline = event.get_message_outline()
+
+        # 2. 黑名单检查
+        blacklist_keywords_str = self.config.get("blacklist_keywords", "")
+        if blacklist_keywords_str:
+            blacklist_keywords = [kw.strip() for kw in blacklist_keywords_str.split('|') if kw.strip()]
+            if any(keyword in message_outline for keyword in blacklist_keywords):
+                logger.info("AngelEye: 消息命中黑名单，跳过处理。")
+                return
+
+        # 3. 白名单检查
+        whitelist_enabled = self.config.get("whitelist_enabled", False)
+        if whitelist_enabled:
+            whitelist_keywords_str = self.config.get("whitelist_keywords", "")
+            if not whitelist_keywords_str:  # 如果白名单开启但列表为空，则不匹配任何消息
+                logger.info("AngelEye: 白名单已启用但列表为空，跳过处理。")
+                return
+
+            whitelist_keywords = [kw.strip() for kw in whitelist_keywords_str.split('|') if kw.strip()]
+            if not any(keyword in message_outline for keyword in whitelist_keywords):
+                logger.info("AngelEye: 消息未命中白名单，跳过处理。")
+                return
+
+        # ==================== 新增前置检查逻辑 END ======================
+
         # 在事件处理时即时获取三个独立的 Provider
         classifier_model_id = self.config.get("classifier_model_id")
         filter_model_id = self.config.get("filter_model_id")
@@ -149,7 +180,7 @@ class AngelEyePlugin(star.Star):
         try:
             # 1. 获取对话记录（统一处理天使之心上下文和现有逻辑）
             dialogue_records = self._get_dialogue_records(event, req.contexts, original_prompt)
-            
+
             # 如果对话记录为空（天使之心指示不需要搜索），直接返回
             if not dialogue_records:
                 logger.info("AngelEye: 无需补充知识，流程结束。")

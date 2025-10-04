@@ -94,5 +94,23 @@
     "title": "启用智能筛选",
     "description": "启用搜索结果AI筛选",
     "default": false
+  },
+  "blacklist_keywords": {
+    "type": "string",
+    "title": "黑名单关键词",
+    "description": "命中则不触发。多个用'|'分隔。",
+    "default": "/"
+  },
+  "whitelist_enabled": {
+    "type": "bool",
+    "title": "启用白名单",
+    "description": "是否启用白名单过滤模式。",
+    "default": false
+  },
+  "whitelist_keywords": {
+    "type": "string",
+    "title": "白名单关键词",
+    "description": "启用后，命中才触发。多个用'|'分隔。",
+    "default": "什么是|怎么做|如何|为什么|解释|介绍|含义|区别|了解"
   }
 }
