@@ -11,6 +11,12 @@
     "description": "对话意图分析模型ID（必需）",
     "default": ""
   },
+  "is_classifier_thought_model": {
+    "type": "bool",
+    "title": "分类模型是思考模型",
+    "description": "分类模型是否是思考模型？如果不是，将引导分类模型思考。",
+    "default": false
+  },
   "filter_model_id": {
     "type": "string",
     "title": "筛选模型 Provider ID",
