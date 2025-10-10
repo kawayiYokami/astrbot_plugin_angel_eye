@@ -19,21 +19,35 @@ class Classifier:
     分类器角色，负责分析对话上下文，生成知识获取请求
     使用"思维链+JSON"模式，提供可解释性
     """
-    def __init__(self, provider: 'Provider'):
+    def __init__(self, provider: 'Provider', config: Dict[str, Any]):
         """
         初始化分类器
 
         :param provider: 用于调用LLM的Provider
+        :param config: 插件配置字典
         """
         self.provider = provider
-        # 在初始化时直接加载Prompt模板
-        prompt_path = Path(__file__).parent.parent / "prompts" / "classifier_prompt.md"
+        self.config = config
+
+        # 根据模型是否为“思考模型”来决定使用哪个提示词
+        is_thought_model = self.config.get("is_classifier_thought_model", False)
+
+        if is_thought_model:
+            # 对于思考模型，使用直接输出JSON的提示词
+            prompt_filename = "classifier_direct_prompt.md"
+        else:
+            # 对于非思考模型，使用引导其思考的提示词
+            prompt_filename = "classifier_prompt.md"
+        
+        prompt_path = Path(__file__).parent.parent / "prompts" / prompt_filename
+        
         try:
             self.prompt_template = prompt_path.read_text(encoding="utf-8")
-            logger.debug("AngelEye[Classifier]: 成功加载Prompt模板")
+            logger.debug(f"AngelEye[Classifier]: 成功加载Prompt模板: {prompt_filename}")
         except FileNotFoundError:
             logger.error(f"AngelEye[Classifier]: 找不到Prompt文件 {prompt_path}")
-            self.prompt_template = "分析对话: {dialogue}"
+            # 提供一个非常基础的备用模板
+            self.prompt_template = "分析以下对话并以JSON格式返回你的分析结果: {dialogue}"
 
     async def get_knowledge_request(self, contexts: List[Dict], current_prompt: str) -> Optional[KnowledgeRequest]:
         """

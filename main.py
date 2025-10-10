@@ -171,7 +171,7 @@ class AngelEyePlugin(star.Star):
             return
 
         # 在每次请求时创建新的角色实例，避免状态污染
-        classifier = Classifier(classifier_provider)
+        classifier = Classifier(classifier_provider, self.config)
         smart_retriever = SmartRetriever(filter_provider, summarizer_provider, self.config)
 
         logger.info("AngelEye: 开始上下文增强流程")
