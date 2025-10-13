@@ -12,3 +12,4 @@ angel_eye_cache/
 logs/
 # Local config
 config.local.yaml
+.*

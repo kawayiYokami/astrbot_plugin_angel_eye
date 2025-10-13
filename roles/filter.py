@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 from ..core.exceptions import ParsingError, AngelEyeError
 from ..core.formatter import format_unified_message
 from ..core.json_parser import safe_extract_json
+from ..core.context.small_model_prompt_builder import SmallModelPromptBuilder
 
 
 
@@ -92,11 +93,13 @@ class Filter:
             # 使用备用模板作为降级策略
             prompt_template = "筛选最匹配的词条。对话: {dialogue}\n实体: {entity_name}\n候选: {candidate_list}"
 
-        final_prompt = prompt_template.format(
-            dialogue=formatted_dialogue,
-            entity_name=entity_name,
-            candidate_list=formatted_candidates
+        # 先替换 {dialogue}，然后再替换其他占位符
+        temp_prompt = SmallModelPromptBuilder.inject_dialogue_into_template(
+            prompt_template,
+            formatted_dialogue
         )
+        # 再替换剩余的占位符
+        final_prompt = temp_prompt.replace('{entity_name}', entity_name).replace('{candidate_list}', formatted_candidates)
 
         try:
             logger.debug(f"AngelEye[Filter]: 正在调用LLM进行筛选...")
