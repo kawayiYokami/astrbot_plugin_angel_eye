@@ -221,40 +221,45 @@ class SmartRetriever:
                 logger.info(f"AngelEye: 找到完全匹配 '{selected_entry}'")
                 break
 
-        # Case B: 模糊匹配，调用Filter
+        # Case B: 模糊匹配，根据配置决定是否调用Filter
         if not selected_entry and len(search_results) > 0:
-            if self.config.get("filter_enabled", True):
+            if self.config.get("filter_enabled", False):
+                # 启用了过滤器，调用Filter进行智能筛选
                 logger.info(f"AngelEye: 无完全匹配，调用Filter从 {len(search_results)} 个结果中筛选...")
 
-            # 构造候选列表供Filter使用
-            candidate_list = [
-                {
-                    "title": r["title"],
-                    "snippet": r.get("snippet", ""),
-                    "url": r.get("url", "")
-                }
-                for r in search_results
-            ]
+                # 构造候选列表供Filter使用
+                candidate_list = [
+                    {
+                        "title": r["title"],
+                        "snippet": r.get("snippet", ""),
+                        "url": r.get("url", "")
+                    }
+                    for r in search_results
+                ]
 
-            # 调用Filter进行筛选
-            # 将格式化后的对话历史传递给Filter
-            selected_title = await self.filter.select_best_entry(
-                contexts=[],  # 保持为空，因为formatted_dialogue已经格式化
-                current_prompt=formatted_dialogue, # 直接传递格式化后的formatted_dialogue
-                entity_name=entity_name,
-                candidate_list=candidate_list
-            )
+                # 调用Filter进行筛选
+                # 将格式化后的对话历史传递给Filter
+                selected_title = await self.filter.select_best_entry(
+                    contexts=[],  # 保持为空，因为formatted_dialogue已经格式化
+                    current_prompt=formatted_dialogue, # 直接传递格式化后的formatted_dialogue
+                    entity_name=entity_name,
+                    candidate_list=candidate_list
+                )
 
-            if selected_title:
-                # 找到对应的pageid
-                for result in search_results:
-                    if result["title"] == selected_title:
-                        selected_entry = selected_title
-                        selected_pageid = result.get("pageid")
-                        logger.info(f"AngelEye: Filter选择了 '{selected_entry}'")
-                        break
+                if selected_title:
+                    # 找到对应的pageid
+                    for result in search_results:
+                        if result["title"] == selected_title:
+                            selected_entry = selected_title
+                            selected_pageid = result.get("pageid")
+                            logger.info(f"AngelEye: Filter选择了 '{selected_entry}'")
+                            break
             else:
-                logger.info(f"AngelEye: 无完全匹配，但智能筛选功能已禁用。")
+                # 未启用过滤器，直接使用第一个搜索结果
+                logger.info(f"AngelEye: 智能筛选功能已禁用，默认使用第一个搜索结果")
+                selected_entry = search_results[0]["title"]
+                selected_pageid = search_results[0].get("pageid")
+                logger.info(f"AngelEye: 选择了第一个结果 '{selected_entry}'")
 
         # Case C: 无匹配
         if not selected_entry:
