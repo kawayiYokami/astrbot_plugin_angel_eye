@@ -2,12 +2,13 @@
 智能知识检索器 (SmartRetriever)
 实现动态执行策略，根据搜索结果智能决策处理方式
 """
-import json
-from typing import List, Dict, Optional, Any
-from astrbot.api.provider import Provider
-
 import logging
-logger = logging.getLogger(__name__)
+from typing import List, Dict, Optional, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from astrbot.api.event import AstrMessageEvent
+
+from astrbot.api.provider import Provider
 from ..models.request import KnowledgeRequest
 from ..models.knowledge import KnowledgeChunk, KnowledgeResult
 from ..clients.wikipedia_client import WikipediaClient
@@ -18,7 +19,9 @@ from .summarizer import Summarizer
 # from .retriever_qqchat import QQChatHistoryRetriever # 移除旧的导入
 from ..services.qq_history_service import QQChatHistoryService # 导入新的服务
 from ..core.wikitext_cleaner import clean as clean_wikitext
-from ..core.cache_manager import get, set, build_doc_key, build_fact_key, build_search_key
+from ..core.cache_manager import get, set, build_doc_key, build_search_key
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -65,7 +68,7 @@ class SmartRetriever:
         # 可根据需要添加更多规则，如全角/半角转换、移除特殊符号等
         return s.lower().strip()
 
-    async def retrieve(self, request: KnowledgeRequest, formatted_dialogue: str, event: 'Event') -> KnowledgeResult:
+    async def retrieve(self, request: KnowledgeRequest, formatted_dialogue: str, event: 'AstrMessageEvent') -> KnowledgeResult:
         # 即时初始化子角色和服务
         if self.filter is None:
             self.filter = Filter(self.filter_provider)
@@ -174,7 +177,7 @@ class SmartRetriever:
         return chunks
 
 
-    async def _process_document(self, entity_name: str, source: str, formatted_dialogue: str, event: 'Event') -> Optional[KnowledgeChunk]:
+    async def _process_document(self, entity_name: str, source: str, formatted_dialogue: str, event: 'AstrMessageEvent') -> Optional[KnowledgeChunk]:
         """
         处理单个文档请求，实现动态执行策略
 
@@ -256,7 +259,7 @@ class SmartRetriever:
                             break
             else:
                 # 未启用过滤器，直接使用第一个搜索结果
-                logger.info(f"AngelEye: 智能筛选功能已禁用，默认使用第一个搜索结果")
+                logger.info("AngelEye: 智能筛选功能已禁用，默认使用第一个搜索结果")
                 selected_entry = search_results[0]["title"]
                 selected_pageid = search_results[0].get("pageid")
                 logger.info(f"AngelEye: 选择了第一个结果 '{selected_entry}'")
@@ -337,7 +340,7 @@ class SmartRetriever:
         else:
             return None
 
-    async def _process_qq_chat_history(self, entity_name: str, parameters: Dict[str, Any], formatted_dialogue: str, event: 'Event') -> Optional[KnowledgeChunk]:
+    async def _process_qq_chat_history(self, entity_name: str, parameters: Dict[str, Any], formatted_dialogue: str, event: 'AstrMessageEvent') -> Optional[KnowledgeChunk]:
         """
         处理 QQ 群聊历史记录请求。
 
@@ -388,7 +391,7 @@ class SmartRetriever:
             # 3. 根据 needs_summary 标志和开关决定是否调用 Summarizer
             if needs_summary and self.config.get("chat_summarizer_enabled", True):
                 # 如果需要总结，且开关开启，才调用 Summarizer
-                logger.info(f"AngelEye: 需要精选聊天记录，调用Summarizer...")
+                logger.info("AngelEye: 需要精选聊天记录，调用Summarizer...")
                 final_content = await self.summarizer.summarize(
                     source="qq_chat_history",
                     full_content=historical_chat,
@@ -397,7 +400,7 @@ class SmartRetriever:
                 )
                 # 如果总结失败，提供一个降级方案（例如，返回原始记录的片段）
                 if not final_content:
-                    logger.warning(f"AngelEye: 聊天记录分析失败，返回原始记录摘要。")
+                    logger.warning("AngelEye: 聊天记录分析失败，返回原始记录摘要。")
                     final_content = f"关于“{entity_name}”的讨论摘要：\n" + historical_chat[:500] + "..."
             else:
                 # 如果不需要总结，或开关关闭，直接使用原始记录

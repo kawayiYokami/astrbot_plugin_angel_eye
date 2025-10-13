@@ -5,7 +5,6 @@
 from functools import wraps
 import logging
 logger = logging.getLogger(__name__)
-from .exceptions import ValidationError
 
 
 def validate_input(max_length: int = None):

@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 import time
 from datetime import datetime, timezone, timedelta
-from typing import Dict, List, Any
+from typing import Dict, Any
 
 # 定义北京时间时区
 BEIJING_TZ = timezone(timedelta(hours=8))

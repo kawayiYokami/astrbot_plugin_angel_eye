@@ -4,7 +4,6 @@ Wikitext 清理器模块。
 """
 
 import re
-from typing import Optional
 
 
 def clean(wikitext: str) -> str:

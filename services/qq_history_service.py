@@ -4,12 +4,13 @@ Angel Eye 插件 - QQ 群聊历史服务
 """
 import asyncio
 from datetime import datetime, timedelta
+import logging
 from typing import List, Dict, Optional, TYPE_CHECKING
 
-import logging
-logger = logging.getLogger(__name__)
 from ..core.cache_manager import get, set as set_cache
 from ..core.formatter import format_unified_message # 导入新的格式化工具
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from astrbot.api import Bot
@@ -83,9 +84,9 @@ class QQChatHistoryService:
                     cursor_id = round_1_messages[0]["message_id"]
                     logger.debug(f"AngelEye: 阶段一完成，获取 {len(new_messages)} 条新消息，新游标: {cursor_id}")
                 else:
-                    logger.debug(f"AngelEye: 阶段一未获取到新消息。")
+                    logger.debug("AngelEye: 阶段一未获取到新消息。")
             else:
-                logger.debug(f"AngelEye: 阶段一服务器返回空列表。")
+                logger.debug("AngelEye: 阶段一服务器返回空列表。")
         except Exception as e:
             logger.error(f"AngelEye: 阶段一取货失败: {e}")
             # 即使失败，我们也继续执行后续阶段
@@ -97,7 +98,7 @@ class QQChatHistoryService:
         elif hours is not None and messages:
             temp_sorted = sorted(messages, key=lambda m: m.get('time', 0))
             if temp_sorted[0].get("time", 0) < start_timestamp:
-                logger.info(f"AngelEye: 阶段一后最旧消息已早于时间限制，跳过后续阶段。")
+                logger.info("AngelEye: 阶段一后最旧消息已早于时间限制，跳过后续阶段。")
                 goto_finalization = True
             else:
                 goto_finalization = False
@@ -120,7 +121,7 @@ class QQChatHistoryService:
                     break
 
                 if not local_round_messages:
-                    logger.debug(f"AngelEye: 本地货架返回空列表，结束本地阶段。")
+                    logger.debug("AngelEye: 本地货架返回空列表，结束本地阶段。")
                     break
 
                 new_messages = [msg for msg in local_round_messages if msg.get("message_id") not in processed_ids]
@@ -137,7 +138,7 @@ class QQChatHistoryService:
                 if hours is not None and messages:
                     temp_sorted = sorted(messages, key=lambda m: m.get('time', 0))
                     if temp_sorted[0].get("time", 0) < start_timestamp:
-                        logger.info(f"AngelEye: 最旧消息已早于时间限制，结束本地阶段。")
+                        logger.info("AngelEye: 最旧消息已早于时间限制，结束本地阶段。")
                         break
                 if B - A == 0:
                     logger.debug(f"AngelEye: 本地缓存相对于当前篮子已无新货 (B-A={B-A})，结束本地阶段。")
@@ -153,7 +154,7 @@ class QQChatHistoryService:
         elif hours is not None and messages:
             temp_sorted = sorted(messages, key=lambda m: m.get('time', 0))
             if temp_sorted[0].get("time", 0) < start_timestamp:
-                logger.info(f"AngelEye: 阶段二后最旧消息已早于时间限制，跳过服务器阶段。")
+                logger.info("AngelEye: 阶段二后最旧消息已早于时间限制，跳过服务器阶段。")
                 goto_finalization = True
             # else: goto_finalization 保持 False
 
@@ -181,7 +182,7 @@ class QQChatHistoryService:
                     sync_page_count += 1
 
                     if not server_round_messages:
-                        logger.info(f"AngelEye: 服务器返回空列表，历史记录同步完成。")
+                        logger.info("AngelEye: 服务器返回空列表，历史记录同步完成。")
                         break
 
                     new_messages = [msg for msg in server_round_messages if msg.get("message_id") not in processed_ids]
@@ -207,7 +208,7 @@ class QQChatHistoryService:
                 if hours is not None and messages:
                     temp_sorted = sorted(messages, key=lambda m: m.get('time', 0))
                     if temp_sorted[0].get("time", 0) < start_timestamp:
-                        logger.info(f"AngelEye: 最旧消息已早于时间限制，结束服务器阶段。")
+                        logger.info("AngelEye: 最旧消息已早于时间限制，结束服务器阶段。")
                         break
                 if sync_page_count >= max_sync_pages:
                     logger.warning(f"AngelEye: 达到最大同步页数 ({max_sync_pages})，结束服务器阶段。")

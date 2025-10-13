@@ -3,6 +3,12 @@
 """
 import sys
 import os
+from test.test_formatter import test_format_angelheart_message, test_format_unified_message
+from test.test_main import (
+    test_get_dialogue_records_with_angelheart,
+    test_get_dialogue_records_without_angelheart,
+    test_error_handling
+)
 
 # 添加插件路径到 Python 路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -11,7 +17,6 @@ print("=== 开始运行 Angel Eye 插件测试 ===\n")
 
 # 运行格式化测试
 print("1. 运行格式化功能测试...")
-from test.test_formatter import test_format_angelheart_message, test_format_unified_message
 try:
     test_format_angelheart_message()
     test_format_unified_message()
@@ -21,11 +26,6 @@ except Exception as e:
 
 # 运行主模块测试
 print("2. 运行主模块功能测试...")
-from test.test_main import (
-    test_get_dialogue_records_with_angelheart,
-    test_get_dialogue_records_without_angelheart,
-    test_error_handling
-)
 
 try:
     test_get_dialogue_records_with_angelheart()

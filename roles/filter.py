@@ -6,13 +6,18 @@ Angel Eye 插件 - 筛选器角色 (Filter)
 import json
 from typing import List, Dict, Optional
 from pathlib import Path
-
 import logging
-logger = logging.getLogger(__name__)
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from astrbot.api.provider import Provider
+
 from ..core.exceptions import ParsingError, AngelEyeError
 from ..core.formatter import format_unified_message
 from ..core.json_parser import safe_extract_json
 from ..core.context.small_model_prompt_builder import SmallModelPromptBuilder
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -102,7 +107,7 @@ class Filter:
         final_prompt = temp_prompt.replace('{entity_name}', entity_name).replace('{candidate_list}', formatted_candidates)
 
         try:
-            logger.debug(f"AngelEye[Filter]: 正在调用LLM进行筛选...")
+            logger.debug("AngelEye[Filter]: 正在调用LLM进行筛选...")
             # 可选：记录发送的核心上下文
             # logger.debug(f"AngelEye[Filter]: 发送的上下文: {formatted_dialogue[:200]}...")
             # logger.debug(f"AngelEye[Filter]: 候选列表: {formatted_candidates}")
@@ -136,7 +141,7 @@ class Filter:
 
         except json.JSONDecodeError as e:
             logger.error(f"AngelEye[Filter]: 解析JSON失败: {e}")
-            logger.debug(f"JSON文本: {json_str if 'json_str' in locals() else response_text}")
+            logger.debug(f"JSON文本: {response_text}")
             raise ParsingError("Failed to parse JSON from Filter LLM response") from e
         except Exception as e:
             logger.error(f"AngelEye[Filter]: 调用LLM时发生错误: {e}", exc_info=True)

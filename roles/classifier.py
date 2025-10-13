@@ -5,13 +5,18 @@ Angel Eye 插件 - 分类器角色 (Classifier)
 import json
 from typing import List, Dict, Optional, Any
 from pathlib import Path
-
 import logging
-logger = logging.getLogger(__name__)
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from astrbot.api.provider import Provider
+
 from ..models.request import KnowledgeRequest
 from ..core.exceptions import ParsingError, AngelEyeError
 from ..core.json_parser import safe_extract_json
 from ..core.context.small_model_prompt_builder import SmallModelPromptBuilder
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -127,7 +132,7 @@ class Classifier:
 
         except json.JSONDecodeError as e:
             logger.error(f"AngelEye[Classifier]: 解析JSON失败: {e}")
-            logger.debug(f"原始JSON文本: {json_text if 'json_text' in locals() else response_text}")
+            logger.debug(f"原始JSON文本: {response_text}")
             raise ParsingError("Failed to parse JSON from Classifier LLM response") from e
         except Exception as e:
             logger.error(f"AngelEye[Classifier]: 调用LLM时发生错误: {e}", exc_info=True)
