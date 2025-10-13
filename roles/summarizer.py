@@ -4,12 +4,16 @@ Angel Eye 插件 - 摘要员角色 (Summarizer)
 """
 from typing import Optional, Dict
 from pathlib import Path
-
 import tiktoken
 import logging
-logger = logging.getLogger(__name__)
-from ..core.exceptions import AngelEyeError
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from astrbot.api.provider import Provider
+
 from ..core.context.small_model_prompt_builder import SmallModelPromptBuilder
+
+logger = logging.getLogger(__name__)
 
 
 class Summarizer:

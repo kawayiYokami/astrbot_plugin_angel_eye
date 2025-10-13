@@ -2,21 +2,17 @@
 Angel Eye 插件主入口
 实现轻量级指令驱动的知识获取架构
 """
-import json
 import astrbot.api.star as star
 import astrbot.api.event.filter as filter
 from astrbot.api.event import AstrMessageEvent
-from astrbot.api.provider import ProviderRequest, Provider
-import random
+from astrbot.api.provider import ProviderRequest
 from astrbot.core.star.star_tools import StarTools
 
 from astrbot.api import logger
-from .services.qq_history_service import QQChatHistoryService
 from .core import cache_manager
 from .core.exceptions import AngelEyeError
 from .roles.smart_retriever import SmartRetriever
 from .roles.classifier import Classifier
-from .roles.summarizer import Summarizer
 from .core.context.small_model_prompt_builder import SmallModelPromptBuilder
 
 
@@ -60,7 +56,7 @@ class AngelEyePlugin(star.Star):
 
                 # 使用天使之心格式化方法
                 formatted = SmallModelPromptBuilder.format_conversation_summary(event.angelheart_context)
-                logger.info(f"AngelEye: 使用天使之心上下文")
+                logger.info("AngelEye: 使用天使之心上下文")
                 return formatted
 
             except Exception as e:
@@ -68,7 +64,7 @@ class AngelEyePlugin(star.Star):
 
         # 2. 回退到 Astar 原生上下文
         formatted = SmallModelPromptBuilder.format_astar_conversation(req_contexts, original_prompt)
-        logger.info(f"AngelEye: 使用 Astar 原生上下文")
+        logger.info("AngelEye: 使用 Astar 原生上下文")
         return formatted
 
     @filter.on_llm_request(priority=-50)
@@ -144,9 +140,12 @@ class AngelEyePlugin(star.Star):
         # 验证Provider可用性
         if not all([classifier_provider, filter_provider, summarizer_provider]):
             missing = []
-            if not classifier_provider: missing.append(f"分类模型({classifier_model_id})")
-            if not filter_provider: missing.append(f"筛选模型({filter_model_id})")
-            if not summarizer_provider: missing.append(f"摘要模型({summarizer_model_id})")
+            if not classifier_provider:
+                missing.append(f"分类模型({classifier_model_id})")
+            if not filter_provider:
+                missing.append(f"筛选模型({filter_model_id})")
+            if not summarizer_provider:
+                missing.append(f"摘要模型({summarizer_model_id})")
             logger.info(f"AngelEye: 以下模型未找到，跳过上下文增强: {', '.join(missing)}")
             return
 
@@ -168,7 +167,7 @@ class AngelEyePlugin(star.Star):
 
             # 2. 调用Classifier生成轻量级知识请求指令
             knowledge_request = await classifier.get_knowledge_request(req.contexts, original_prompt)
-            logger.info(f"AngelEye: 步骤 1/3 - 分类器分析完成")
+            logger.info("AngelEye: 步骤 1/3 - 分类器分析完成")
             logger.debug(f"  - 分类结果 (KnowledgeRequest): {knowledge_request}")
 
             # 如果没有需要查询的知识，直接返回
@@ -178,7 +177,7 @@ class AngelEyePlugin(star.Star):
 
             # 2. 调用SmartRetriever执行智能知识检索
             knowledge_result = await smart_retriever.retrieve(knowledge_request, formatted_dialogue, event) # 传入 event 参数
-            logger.info(f"AngelEye: 步骤 2/3 - 智能检索完成")
+            logger.info("AngelEye: 步骤 2/3 - 智能检索完成")
             if knowledge_result and knowledge_result.chunks:
                 logger.debug(f"  - 检索到 {len(knowledge_result.chunks)} 个知识片段")
 
@@ -214,7 +213,7 @@ class AngelEyePlugin(star.Star):
 
             # 原有的注入代码
             req.system_prompt = (req.system_prompt or '') + injection_text
-            logger.info(f"AngelEye: 成功注入知识，流程结束。")
+            logger.info("AngelEye: 成功注入知识，流程结束。")
 
         except AngelEyeError as e:
             logger.error(f"AngelEye: 在上下文增强流程中发生错误: {e}", exc_info=True)

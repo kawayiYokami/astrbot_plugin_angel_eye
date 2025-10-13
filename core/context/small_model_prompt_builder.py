@@ -89,7 +89,7 @@ class SmallModelPromptBuilder:
                 f"- 回复策略: {reply_strategy}",
                 f"- 回复目标: {reply_target}"
             ]
-            decision_section = f"\n# 关于当前对话的理解\n" + "\n".join(decision_lines)
+            decision_section = "\n# 关于当前对话的理解\n" + "\n".join(decision_lines)
 
         # 组合所有部分
         return f"{conversation_section}{decision_section}"

@@ -312,7 +312,7 @@ class WikidataClient:
                             logger.debug(f"AngelEye[WikidataClient]: 通过计分消歧义成功 -> '{best_item['label']}' (ID: {best_item['id']}, 得分: {best_score})")
                             return best_item
                         else:
-                            logger.debug(f"AngelEye[WikidataClient]: 所有候选实体的匹配得分均为0。")
+                            logger.debug("AngelEye[WikidataClient]: 所有候选实体的匹配得分均为0。")
 
                 # 回退到简单启发式：优先选择描述包含相关关键词的结果
                 for item in data["search"]:
