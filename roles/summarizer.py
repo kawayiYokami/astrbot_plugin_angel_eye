@@ -9,6 +9,7 @@ import tiktoken
 import logging
 logger = logging.getLogger(__name__)
 from ..core.exceptions import AngelEyeError
+from ..core.context.small_model_prompt_builder import SmallModelPromptBuilder
 
 
 class Summarizer:
@@ -81,11 +82,13 @@ class Summarizer:
             else:
                 # 若tiktoken初始化失败，不进行内容截断
                 content_to_summarize = full_content
-            final_prompt = prompt_template.format(
-                full_content=content_to_summarize,
-                entity_name=entity_name,
-                dialogue=dialogue
+            # 先替换 {dialogue}
+            temp_prompt = SmallModelPromptBuilder.inject_dialogue_into_template(
+                prompt_template,
+                dialogue
             )
+            # 再替换剩余的占位符
+            final_prompt = temp_prompt.replace('{full_content}', content_to_summarize).replace('{entity_name}', entity_name)
         elif source == "qq_chat_history":
             prompt_template = self.chat_prompt_template
             # 聊天记录的 prompt 可能需要不同的变量和长度控制
@@ -98,10 +101,15 @@ class Summarizer:
                     content_to_summarize = self.encoding.decode(truncated_tokens)
                     # 为了明确告知模型信息被截断，可以添加提示
                     content_to_summarize = f"...(部分历史记录已省略)...\n{content_to_summarize}"
-            final_prompt = prompt_template.format(
-                historical_chat=content_to_summarize,
-                latest_dialogue=dialogue
+            # 这里模板中使用的是 {latest_dialogue} 而不是 {dialogue}
+            # 先创建一个临时变量映射
+            temp_template = prompt_template.replace('{latest_dialogue}', '{dialogue}')
+            temp_prompt = SmallModelPromptBuilder.inject_dialogue_into_template(
+                temp_template,
+                dialogue
             )
+            # 再替换剩余的占位符
+            final_prompt = temp_prompt.replace('{historical_chat}', content_to_summarize)
         else:
             logger.warning(f"AngelEye[Summarizer]: 不支持的摘要源: {source}")
             return None

@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 from ..models.request import KnowledgeRequest
 from ..core.exceptions import ParsingError, AngelEyeError
 from ..core.json_parser import safe_extract_json
+from ..core.context.small_model_prompt_builder import SmallModelPromptBuilder
 
 
 
@@ -81,9 +82,11 @@ class Classifier:
         dialogue_parts.append(f"[用户]{current_prompt}")
 
         formatted_dialogue = "\n".join(dialogue_parts)
-        # 动态转义模板中的所有花括号，然后恢复我们需要的占位符
-        safe_template = self.prompt_template.replace('{', '{{').replace('}', '}}').replace('{{dialogue}}', '{dialogue}')
-        final_prompt = safe_template.format(dialogue=formatted_dialogue)
+        # 使用统一的注入方法
+        final_prompt = SmallModelPromptBuilder.inject_dialogue_into_template(
+            self.prompt_template,
+            formatted_dialogue
+        )
 
         try:
             # 调用LLM
