@@ -14,6 +14,7 @@ from .core.exceptions import AngelEyeError
 from .roles.smart_retriever import SmartRetriever
 from .roles.classifier import Classifier
 from .core.context.small_model_prompt_builder import SmallModelPromptBuilder
+from .models.request import KnowledgeRequest
 
 
 class AngelEyePlugin(star.Star):
@@ -165,9 +166,36 @@ class AngelEyePlugin(star.Star):
                 logger.info("AngelEye: 无需补充知识，流程结束。")
                 return
 
-            # 2. 调用Classifier生成轻量级知识请求指令
-            knowledge_request = await classifier.get_knowledge_request(req.contexts, original_prompt)
-            logger.info("AngelEye: 步骤 1/3 - 分类器分析完成")
+            # 2. 检查是否有天使之心提供的决策，如果有则直接使用
+            knowledge_request = None
+            
+            # 检查天使之心是否已经生成了查询请求
+            if hasattr(event, 'angelheart_context') and event.angelheart_context:
+                try:
+                    import json
+                    context_data = json.loads(event.angelheart_context)
+                    # angel_eye_request 在 secretary_decision 中
+                    secretary_decision = context_data.get('secretary_decision', {})
+                    if isinstance(secretary_decision, dict) and 'angel_eye_request' in secretary_decision:
+                        # 使用天使之心生成的请求
+                        request_data = secretary_decision['angel_eye_request']
+                        knowledge_request = KnowledgeRequest(
+                            required_docs=request_data.get('required_docs', {}),
+                            required_facts=request_data.get('required_facts', []),
+                            chat_history=request_data.get('chat_history', {})
+                        )
+                        logger.info("AngelEye: 使用天使之心生成的查询请求")
+                        logger.debug(f"  - 天使之心请求: {knowledge_request}")
+                except Exception as e:
+                    logger.warning(f"AngelEye: 解析天使之心请求失败: {e}")
+            
+            # 如果没有天使之心的请求，则使用自己的分类器
+            if not knowledge_request:
+                knowledge_request = await classifier.get_knowledge_request(req.contexts, original_prompt)
+                logger.info("AngelEye: 步骤 1/3 - 分类器分析完成")
+            else:
+                logger.info("AngelEye: 步骤 1/3 - 使用天使之心决策完成")
+            
             logger.debug(f"  - 分类结果 (KnowledgeRequest): {knowledge_request}")
 
             # 如果没有需要查询的知识，直接返回
@@ -176,6 +204,7 @@ class AngelEyePlugin(star.Star):
                 return
 
             # 2. 调用SmartRetriever执行智能知识检索
+            logger.debug(f"AngelEye: 准备调用SmartRetriever，knowledge_request={knowledge_request}")
             knowledge_result = await smart_retriever.retrieve(knowledge_request, formatted_dialogue, event) # 传入 event 参数
             logger.info("AngelEye: 步骤 2/3 - 智能检索完成")
             if knowledge_result and knowledge_result.chunks:
@@ -209,7 +238,7 @@ class AngelEyePlugin(star.Star):
             )
 
             logger.info("AngelEye: 步骤 3/3 - 准备注入上下文")
-            logger.debug(f"  - 注入的背景知识内容: {background_knowledge}")
+            logger.debug(f"  - 注入的背景知识内容: {background_knowledge[:50]}...")
 
             # 原有的注入代码
             req.system_prompt = (req.system_prompt or '') + injection_text

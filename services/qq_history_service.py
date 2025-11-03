@@ -31,7 +31,9 @@ class QQChatHistoryService:
         bot: 'Bot',
         group_id: str,
         hours: Optional[int] = None,
-        count: Optional[int] = None
+        count: Optional[int] = None,
+        filter_user_ids: Optional[List[int]] = None,
+        keywords: Optional[List[str]] = None
     ) -> List[str]:
         """
         核心逻辑：使用三阶段取货模型获取并格式化 QQ 群聊历史记录 (KISS V10)
@@ -229,6 +231,29 @@ class QQChatHistoryService:
         
         # 将这个全新的、最完整的列表，完整地写回本地缓存
         await set_cache(cache_key, sorted_messages)
+
+        # --- 应用过滤条件 ---
+        if filter_user_ids or keywords:
+            logger.info(f"AngelEye: 应用过滤条件 - 用户IDs: {filter_user_ids}, 关键词: {keywords}")
+            filtered_messages = []
+            
+            for msg in sorted_messages:
+                # 检查用户ID过滤
+                if filter_user_ids:
+                    user_id = msg.get('user_id')
+                    if user_id not in filter_user_ids:
+                        continue
+                
+                # 检查关键词过滤
+                if keywords:
+                    content = msg.get('content', '')
+                    if not any(keyword in content for keyword in keywords):
+                        continue
+                
+                filtered_messages.append(msg)
+            
+            sorted_messages = filtered_messages
+            logger.info(f"AngelEye: 过滤后剩余 {len(sorted_messages)} 条消息")
 
         # --- 格式化并返回 ---
         formatted_messages = []
