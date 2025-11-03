@@ -44,9 +44,9 @@ class Classifier:
         else:
             # 对于非思考模型，使用引导其思考的提示词
             prompt_filename = "classifier_prompt.md"
-        
+
         prompt_path = Path(__file__).parent.parent / "prompts" / prompt_filename
-        
+
         try:
             self.prompt_template = prompt_path.read_text(encoding="utf-8")
             logger.debug(f"AngelEye[Classifier]: 成功加载Prompt模板: {prompt_filename}")
@@ -134,6 +134,9 @@ class Classifier:
             logger.error(f"AngelEye[Classifier]: 解析JSON失败: {e}")
             logger.debug(f"原始JSON文本: {response_text}")
             raise ParsingError("Failed to parse JSON from Classifier LLM response") from e
+        except AngelEyeError:
+            # 重新抛出自定义异常
+            raise
         except Exception as e:
             logger.error(f"AngelEye[Classifier]: 调用LLM时发生错误: {e}", exc_info=True)
             raise AngelEyeError("Classifier LLM call failed") from e
