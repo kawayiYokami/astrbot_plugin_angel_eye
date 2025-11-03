@@ -16,17 +16,20 @@
 ## 第二部分：JSON 输出
 
 在分隔符 `---JSON---` 之后，我必须输出一个严格的JSON对象，不包含任何其他文本。该JSON对象包含以下字段：
-*   `required_docs` (对象): 一个键值对。键是实体名称，值是建议的数据源 (`"wikipedia"`, `"moegirl"` 或 `"qq_chat_history"`)。
+*   `required_docs` (对象): 一个键值对。键是实体名称（必须是百科词条的准确名称），值是包含关键词的对象。格式为 `{"实体名": {"keywords": ["关键词1", "关键词2"]}}`。
+    - **重要**：实体名必须是百科词条的准确名称，不要包含多个词
+    - **正确示例**：`{"玛拉妮": {"keywords": ["原神"]}}`
+    - **错误示例**：`{"原神 玛拉妮": {...}}`
 *   `required_facts` (字符串数组, 可选): 一个包含结构化事实查询指令的字符串列表。数组中的每个字符串都遵循 `[可选消歧义关键词].实体名.属性名` 的格式。
     *   **规则1**: 方括号 `[]` 内的消歧义关键词**必须**是纯英文，并用 `|` 分隔。
     *   **规则2**: 为了提高查询成功率，对于每一个需要查询的事实，如果可能，请**同时提供中文和英文两个版本**的查询字符串。它们可以共享相同的英文上下文。
-*   `parameters` (对象, 可选): 当 `required_docs` 中包含 `"qq_chat_history"` 时，此字段必须存在。它包含用于获取聊天记录的参数。
+*   `chat_history` (对象, 可选): 当需要查询QQ聊天记录时使用。它包含用于获取聊天记录的参数。
     *   `time_range_hours` (数字, 可选): 根据用户的**时间描述**（如“一小时前”、“今天下午3点到现在”）解析出的小时数。
     *   `message_count` (数字, 可选): 根据用户的**数量描述**（如“最近100条”、“50条消息”）解析出的消息条数。
     *   `summarize` (布尔, 可选): 判断是否需要对获取到的聊天记录进行精选和总结。如果用户的意图是**直接查看原始记录**（如“拉取最近10条”），则为 `false`。如果用户的意图是**对记录进行提问或归纳**（如“总结一下我们昨天聊了什么”），则为 `true`。默认为 `false`。
     *   注意：`time_range_hours` 和 `message_count` 是互斥的，只能选择一个。
 
-如果不需要查询任何知识，我将返回 `{"required_docs": {}, "required_facts": [], "parameters": {}}`。
+如果不需要查询任何知识，我将返回 `{"required_docs": {}, "required_facts": [], "chat_history": {}}`。
 
 ---
 ## 关键示例
@@ -50,7 +53,7 @@
     "[person|emperor|ming dynasty].朱祁镇.出生日期",
     "[person|emperor|ming dynasty].Zhu Qizhen.date of birth"
   ],
-  "parameters": {}
+  "chat_history": {}
 }
 ```
 
@@ -67,11 +70,10 @@
 ```json
 {
   "required_docs": {
-    "来自深渊": "moegirl",
-    "娜娜奇": "moegirl"
+    "娜娜奇": {"keywords": ["来自深渊", "毛茸茸"]}
   },
   "required_facts": [],
-  "parameters": {}
+  "chat_history": {}
 }
 ```
 
@@ -88,13 +90,13 @@
 ```json
 {
   "required_docs": {
-    "苹果公司": "wikipedia"
+    "苹果公司": {"keywords": ["创始人", "乔布斯"]}
   },
   "required_facts": [
     "[company|technology|mobile].苹果公司.创始人",
     "[company|technology|mobile].Apple Inc.founder"
   ],
-  "parameters": {}
+  "chat_history": {}
 }
 ```
 
@@ -105,18 +107,15 @@
 
 **我的输出:**
 我的思考过程:
-用户想要回顾“3小时前到现在”的群聊内容。这需要查询QQ群聊历史记录。我将数据源指定为 `qq_chat_history`，并解析出需要回顾的小时数为3小时。由于用户意图是总结，我将 `summarize` 设置为 `true`。
+用户想要回顾“3小时前到现在”的群聊内容。这需要查询QQ群聊历史记录。我解析出需要回顾的小时数为3小时。
 
 ---JSON---
 ```json
 {
-  "required_docs": {
-    "3小时前群里的聊天总结": "qq_chat_history"
-  },
+  "required_docs": {},
   "required_facts": [],
-  "parameters": {
-    "time_range_hours": 3,
-    "summarize": true
+  "chat_history": {
+    "time_range_hours": 3
   }
 }
 ```
@@ -128,18 +127,15 @@
 
 **我的输出:**
 我的思考过程:
-用户想要回顾“最近100条”消息的内容。这需要查询QQ群聊历史记录。我将数据源指定为 `qq_chat_history`，并解析出需要获取的消息条数为100条。用户的意图是直接查看原始记录，因此 `summarize` 为 `false`。
+用户想要回顾“最近100条”消息的内容。这需要查询QQ群聊历史记录。我解析出需要获取的消息条数为100条。
 
 ---JSON---
 ```json
 {
-  "required_docs": {
-    "最近100条消息": "qq_chat_history"
-  },
+  "required_docs": {},
   "required_facts": [],
-  "parameters": {
-    "message_count": 100,
-    "summarize": false
+  "chat_history": {
+    "time_range_hours": 1
   }
 }
 ```
@@ -151,18 +147,16 @@
 
 **我的输出:**
 我的思考过程:
-用户想要了解关于“新UI”的讨论结论。这需要查询QQ群聊历史记录。我将数据源指定为 `qq_chat_history`，并解析出需要回顾的小时数为24小时。用户的意图是提问和归纳，因此 `summarize` 为 `true`。
+用户想要了解关于“新UI”的讨论结论。这需要查询QQ群聊历史记录。我解析出需要回顾的小时数为24小时。
 
 ---JSON---
 ```json
 {
-  "required_docs": {
-    "关于新UI的讨论结论": "qq_chat_history"
-  },
+  "required_docs": {},
   "required_facts": [],
-  "parameters": {
+  "chat_history": {
     "time_range_hours": 24,
-    "summarize": true
+    "keywords": ["新UI", "讨论", "结论"]
   }
 }
 ```
@@ -181,7 +175,7 @@
 {
   "required_docs": {},
   "required_facts": [],
-  "parameters": {}
+  "chat_history": {}
 }
 ```
 
@@ -199,7 +193,7 @@
 {
   "required_docs": {},
   "required_facts": [],
-  "parameters": {}
+  "chat_history": {}
 }
 ```
 
@@ -224,10 +218,10 @@
 ```json
 {
   "required_docs": {
-    "bash": "wikipedia"
+    "bash": {"keywords": ["powershell", "区别"]}
   },
   "required_facts": [],
-  "parameters": {}
+  "chat_history": {}
 }
 ```
 
