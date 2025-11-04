@@ -61,7 +61,7 @@ class AngelEyePlugin(star.Star):
                 logger.info("AngelEye: 使用天使之心上下文")
                 return formatted
 
-            except Exception as e:
+            except (AttributeError, KeyError, TypeError) as e:
                 logger.warning(f"AngelEye: 处理天使之心上下文失败: {e}")
 
         # 2. 回退到 Astar 原生上下文
@@ -303,7 +303,7 @@ class AngelEyePlugin(star.Star):
                     required_facts=request_data.get('required_facts', []),
                     chat_history=request_data.get('chat_history', {})
                 )
-        except Exception as e:
+        except (json.JSONDecodeError, KeyError, AttributeError) as e:
             logger.warning(f"AngelEye: 解析天使之心请求失败: {e}")
             return None
 
