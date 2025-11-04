@@ -5,6 +5,7 @@
     "description": "插件专属昵称，多个用'|'分隔",
     "default": "fairy|仙灵"
   },
+  
   "classifier_model_id": {
     "type": "string",
     "title": "分类模型 Provider ID",
@@ -17,12 +18,26 @@
     "description": "分类模型是否是思考模型？如果不是，将引导分类模型思考。",
     "default": false
   },
+  "max_classifier_tokens_k": {
+    "type": "int",
+    "title": "分类器最大上下文 (K tokens)",
+    "description": "分类器最大上下文长度(K tokens)，控制历史对话记录的截断",
+    "default": 10
+  },
+  
   "filter_model_id": {
     "type": "string",
     "title": "筛选模型 Provider ID",
     "description": "搜索结果筛选模型ID（必需）",
     "default": ""
   },
+  "filter_enabled": {
+    "type": "bool",
+    "title": "启用智能筛选",
+    "description": "启用搜索结果AI筛选",
+    "default": false
+  },
+  
   "summarizer_model_id": {
     "type": "string",
     "title": "摘要模型 Provider ID",
@@ -31,10 +46,29 @@
   },
   "max_context_tokens_k": {
     "type": "int",
-    "title": "最大上下文长度 (K tokens)",
+    "title": "摘要模型最大上下文 (K tokens)",
     "description": "摘要模型最大上下文长度(K tokens)",
     "default": 100
   },
+  "max_history_tokens_k": {
+    "type": "int",
+    "title": "QQ聊天记录最大长度 (K tokens)",
+    "description": "QQ聊天记录API返回内容的最大长度限制(K tokens)",
+    "default": 50
+  },
+  "wiki_summarizer_enabled": {
+    "type": "bool",
+    "title": "启用百科内容摘要",
+    "description": "启用百科内容AI摘要",
+    "default": false
+  },
+  "chat_summarizer_enabled": {
+    "type": "bool",
+    "title": "启用聊天记录摘要",
+    "description": "启用聊天记录AI摘要",
+    "default": false
+  },
+  
   "moegirl_enabled": {
     "type": "bool",
     "title": "启用萌娘百科",
@@ -53,6 +87,7 @@
     "description": "启用维基数据事实查询",
     "default": false
   },
+  
   "text_length_threshold": {
     "type": "int",
     "title": "文本长度阈值",
@@ -71,36 +106,7 @@
     "description": "HTTP请求超时秒数",
     "default": 10
   },
-  "llm_log_max_size_mb": {
-    "type": "int",
-    "title": "LLM日志最大尺寸(MB)",
-    "description": "LLM日志文件最大MB数",
-    "default": 100
-  },
-  "max_history_tokens_k": {
-    "type": "int",
-    "title": "最大聊天历史 (K tokens)",
-    "description": "QQ聊天历史最大上下文(K tokens)",
-    "default": 50
-  },
-  "wiki_summarizer_enabled": {
-    "type": "bool",
-    "title": "启用百科内容摘要",
-    "description": "启用百科内容AI摘要",
-    "default": false
-  },
-  "chat_summarizer_enabled": {
-    "type": "bool",
-    "title": "启用聊天记录摘要",
-    "description": "启用聊天记录AI摘要",
-    "default": false
-  },
-  "filter_enabled": {
-    "type": "bool",
-    "title": "启用智能筛选",
-    "description": "启用搜索结果AI筛选",
-    "default": false
-  },
+  
   "blacklist_keywords": {
     "type": "string",
     "title": "黑名单关键词",
@@ -118,5 +124,12 @@
     "title": "白名单关键词",
     "description": "启用后，命中才触发。多个用'|'分隔。",
     "default": "什么是|怎么做|如何|为什么|解释|介绍|含义|区别|了解"
+  },
+  
+  "llm_log_max_size_mb": {
+    "type": "int",
+    "title": "LLM日志最大尺寸(MB)",
+    "description": "LLM日志文件最大MB数",
+    "default": 100
   }
 }

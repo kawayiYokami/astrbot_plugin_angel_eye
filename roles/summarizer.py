@@ -95,7 +95,7 @@ class Summarizer:
             final_prompt = temp_prompt.replace('{full_content}', content_to_summarize).replace('{entity_name}', entity_name)
         elif source == "qq_chat_history":
             prompt_template = self.chat_prompt_template
-            # 聊天记录的 prompt 可能需要不同的变量和长度控制
+            # 对QQ API返回的聊天记录进行长度限制
             content_to_summarize = full_content
             if self.encoding:
                 tokens = self.encoding.encode(full_content)
