@@ -5,7 +5,7 @@ Angel Eye 插件 - QQ 群聊历史服务
 import asyncio
 from datetime import datetime, timedelta
 import logging
-from typing import List, Dict, Optional, Tuple, TYPE_CHECKING
+from typing import List, Dict, Optional, TYPE_CHECKING
 from dataclasses import dataclass
 
 from ..core.cache_manager import get, set as set_cache
@@ -304,12 +304,13 @@ class QQChatHistoryService:
     def _apply_filters(
         self,
         messages: List[Dict],
+        start_timestamp: Optional[int],
         filter_user_ids: Optional[List[int]],
         keywords: Optional[List[str]]
     ) -> List[Dict]:
         """应用过滤条件（旧版本，兼容性保留）"""
-        return self._apply_all_filters(messages, None, filter_user_ids, keywords)
-    
+        return self._apply_all_filters(messages, start_timestamp, filter_user_ids, keywords)
+
     def _apply_all_filters(
         self,
         messages: List[Dict],
@@ -319,7 +320,7 @@ class QQChatHistoryService:
     ) -> List[Dict]:
         """应用所有过滤条件：时间、用户ID、关键词"""
         logger.info(f"AngelEye: 应用过滤条件 - 开始时间: {start_timestamp}, 用户IDs: {filter_user_ids}, 关键词: {keywords}")
-        
+
         filtered_messages = []
         for msg in messages:
             # 时间过滤
@@ -327,20 +328,23 @@ class QQChatHistoryService:
                 msg_time = msg.get('time', 0)
                 if msg_time < start_timestamp:
                     continue  # 消息太旧，跳过
-            
+
             # 用户ID过滤
             if filter_user_ids:
                 user_id = msg.get('user_id')
                 if user_id not in filter_user_ids:
                     continue
-            
+
             # 关键词过滤
             if keywords:
                 content = msg.get('content', '')
+                if not isinstance(content, str):
+                    logger.debug(f"AngelEye: 消息内容类型为 {type(content).__name__}，转换为字符串。message_id: {msg.get('message_id')}")
+                    content = str(content)
                 if not any(keyword in content for keyword in keywords):
                     continue
-            
+
             filtered_messages.append(msg)
-        
+
         logger.info(f"AngelEye: 过滤后剩余 {len(filtered_messages)} 条消息")
         return filtered_messages

@@ -74,8 +74,7 @@ class SmartRetriever:
             self.filter = Filter(self.filter_provider)
         if self.summarizer is None:
             self.summarizer = Summarizer(self.summarizer_provider, self.config)
-        if self.qq_history_service is None: # 初始化新的服务
-            self.qq_history_service = QQChatHistoryService()
+        self._ensure_qq_history_service()
 
         """
         核心方法：根据知识请求执行智能检索
@@ -92,7 +91,7 @@ class SmartRetriever:
             logger.info(f"AngelEye: 开始处理 {len(request.required_facts)} 个事实查询...")
             fact_chunks = await self._process_facts(request.required_facts)
             result.chunks.extend(fact_chunks)
-            
+
             # 如果只有事实查询，没有文档查询，直接返回
             if not request.required_docs:
                 logger.info("AngelEye: 仅事实查询，处理完成")
@@ -114,12 +113,12 @@ class SmartRetriever:
                     # 兼容旧格式：doc_info 是字符串（数据源名称）
                     source = doc_info
                     keywords = []
-                
+
                 # 直接调用 _process_document，内部会按优先级尝试数据源
                 doc_chunk = await self._process_document(entity_name, source, keywords, formatted_dialogue, event)
                 if doc_chunk:
                     result.chunks.append(doc_chunk)
-        
+
         # 步骤3：处理聊天记录请求（新格式）
         logger.debug(f"AngelEye: 检查聊天记录参数: {request.chat_history}")
         if request.chat_history:
@@ -129,15 +128,17 @@ class SmartRetriever:
                 result.chunks.append(doc_chunk)
             else:
                 logger.info("AngelEye: 聊天记录查询返回空结果")
-        # 兼容旧格式
-        elif request.parameters and "qq_chat_history" in request.required_docs.values():
-            logger.info("AngelEye: 处理聊天记录查询（旧格式）...")
-            entity_name = next(k for k, v in request.required_docs.items() if v == "qq_chat_history")
-            doc_chunk = await self._process_qq_chat_history(entity_name, request.parameters, formatted_dialogue, event)
-            if doc_chunk:
-                result.chunks.append(doc_chunk)
         else:
-            logger.debug("AngelEye: 无聊天记录查询参数")
+            # 兼容旧格式：查找 qq_chat_history
+            entity_name = next((k for k, v in request.required_docs.items()
+                               if isinstance(v, str) and v == "qq_chat_history"), None)
+            if request.parameters and entity_name:
+                logger.info("AngelEye: 处理聊天记录查询（旧格式）...")
+                doc_chunk = await self._process_qq_chat_history(entity_name, request.parameters, formatted_dialogue, event)
+                if doc_chunk:
+                    result.chunks.append(doc_chunk)
+            else:
+                logger.debug("AngelEye: 无聊天记录查询参数")
 
         logger.info(f"AngelEye: 检索完成，共获取 {len(result.chunks)} 个知识片段")
         return result
@@ -168,7 +169,7 @@ class SmartRetriever:
         # 2. 并发执行所有查询计划
         if not query_plans:
             return []
-        
+
         tasks = [self.wikidata_client.execute_query(plan) for plan in query_plans]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -178,7 +179,7 @@ class SmartRetriever:
             if isinstance(res, Exception):
                 logger.error(f"查询 '{required_facts[i]}' 时出错: {res}")
                 continue
-            
+
             final_facts = res.get("final_facts", {})
             if final_facts:
                 content_lines = [f"- {name}: {value}" for name, value in final_facts.items()]
@@ -189,7 +190,7 @@ class SmartRetriever:
                     entity=entity_name,
                     content="\n".join(content_lines)
                 ))
-        
+
         return chunks
 
 
@@ -197,7 +198,7 @@ class SmartRetriever:
         """
         已废弃：数据源选择逻辑已集成到 _process_document 方法中
         保留此方法仅为向后兼容
-        
+
         :param entity_name: 实体名称
         :param keywords: 关键词列表
         :return: 固定返回 "moegirl"
@@ -218,21 +219,21 @@ class SmartRetriever:
         """
         # 尝试数据源的优先级顺序
         sources_to_try = []
-        
+
         # 如果指定了source且不是qq_chat_history，则优先尝试指定的source
         if source and source != "qq_chat_history":
             sources_to_try.append(source)
-        
+
         # 默认优先级：萌娘百科 -> 维基百科
         if "moegirl" not in sources_to_try and self.config.get("moegirl_enabled", True):
             sources_to_try.append("moegirl")
         if "wikipedia" not in sources_to_try and self.config.get("wikipedia_enabled", True):
             sources_to_try.append("wikipedia")
-        
+
         # 按优先级尝试每个数据源
         for try_source in sources_to_try:
             logger.info(f"AngelEye: 尝试在 {try_source} 搜索 '{entity_name}'...")
-            
+
             # 1. 检查搜索结果列表的缓存
             search_cache_key = build_search_key(try_source, entity_name)
             cached_search_results = await get(search_cache_key)
@@ -256,14 +257,14 @@ class SmartRetriever:
             if not search_results:
                 logger.info(f"AngelEye: '{entity_name}' 在 {try_source} 中无搜索结果，尝试下一个数据源")
                 continue
-            
+
             # 找到结果，处理这个数据源的结果
             logger.info(f"AngelEye: 在 {try_source} 找到 {len(search_results)} 个结果")
-            
+
             # 2. 优化筛选逻辑：单结果直接返回
             selected_entry = None
             selected_pageid = None
-            
+
             # Case A: 检查是否有完全匹配
             for result in search_results:
                 if self.normalize_string(result.get("title", "")) == self.normalize_string(entity_name):
@@ -271,7 +272,7 @@ class SmartRetriever:
                     selected_pageid = result.get("pageid")
                     logger.info(f"AngelEye: 找到完全匹配 '{selected_entry}'")
                     break
-            
+
             # Case B: 模糊匹配
             if not selected_entry:
                 if len(search_results) == 1:
@@ -282,7 +283,7 @@ class SmartRetriever:
                 elif self.config.get("filter_enabled", False):
                     # 多个结果且启用了过滤器，调用Filter筛选
                     logger.info(f"AngelEye: 无完全匹配，调用Filter从 {len(search_results)} 个结果中筛选...")
-                    
+
                     # 构造候选列表供Filter使用
                     candidate_list = [
                         {
@@ -315,12 +316,12 @@ class SmartRetriever:
                     selected_entry = search_results[0]["title"]
                     selected_pageid = search_results[0].get("pageid")
                     logger.info(f"AngelEye: 选择了第一个结果 '{selected_entry}'")
-            
+
             # Case C: 无匹配
             if not selected_entry:
                 logger.info(f"AngelEye: '{entity_name}' 在 {try_source} 中无相关词条，尝试下一个数据源")
                 continue
-            
+
             # 3. 获取页面内容
             cache_key = build_doc_key(try_source, selected_entry)
             cached_content = await get(cache_key)
@@ -330,7 +331,7 @@ class SmartRetriever:
                 full_content = cached_content
             else:
                 logger.info(f"AngelEye: 缓存未命中，获取 '{selected_entry}' 的全文内容...")
-                
+
                 # 获取选中词条的全文
                 full_content = await client.get_page_content(selected_entry, pageid=selected_pageid)
                 if not full_content:
@@ -340,7 +341,7 @@ class SmartRetriever:
                     # 成功获取后，立即缓存原始内容
                     logger.debug(f"AngelEye: 成功获取 '{selected_entry}' 的全文，存入缓存...")
                     await set(cache_key, full_content)
-            
+
             # 4. 内容处理
             if len(full_content) > self.TEXT_LENGTH_THRESHOLD:
                 if self.config.get("wiki_summarizer_enabled", True):
@@ -356,7 +357,7 @@ class SmartRetriever:
                     final_content = clean_wikitext(full_content)
             else:
                 final_content = clean_wikitext(full_content)
-            
+
             # 5. 构建并返回 KnowledgeChunk
             if final_content:
                 return KnowledgeChunk(
@@ -365,136 +366,31 @@ class SmartRetriever:
                     content=final_content,
                     source_url=search_results[0].get("url") if search_results else None
                 )
-        
+
         # 所有数据源都尝试失败
         logger.info(f"AngelEye: '{entity_name}' 在所有数据源中都无相关词条")
         return None
 
-        # 2. 实现智能决策点 (完全匹配 / Filter)
-        selected_entry = None
-        selected_pageid = None
-
-        # Case A: 检查是否有完全匹配
-        for result in search_results:
-            if self.normalize_string(result.get("title", "")) == self.normalize_string(entity_name):
-                selected_entry = result["title"]
-                selected_pageid = result.get("pageid")
-                logger.info(f"AngelEye: 找到完全匹配 '{selected_entry}'")
-                break
-
-        # Case B: 模糊匹配，根据配置决定是否调用Filter
-        if not selected_entry and len(search_results) > 0:
-            if self.config.get("filter_enabled", False):
-                # 启用了过滤器，调用Filter进行智能筛选
-                logger.info(f"AngelEye: 无完全匹配，调用Filter从 {len(search_results)} 个结果中筛选...")
-
-                # 构造候选列表供Filter使用
-                candidate_list = [
-                    {
-                        "title": r["title"],
-                        "snippet": r.get("snippet", ""),
-                        "url": r.get("url", "")
-                    }
-                    for r in search_results
-                ]
-
-                # 调用Filter进行筛选
-                # 将格式化后的对话历史传递给Filter
-                selected_title = await self.filter.select_best_entry(
-                    contexts=[],  # 保持为空，因为formatted_dialogue已经格式化
-                    current_prompt=formatted_dialogue, # 直接传递格式化后的formatted_dialogue
-                    entity_name=entity_name,
-                    candidate_list=candidate_list
-                )
-
-                if selected_title:
-                    # 找到对应的pageid
-                    for result in search_results:
-                        if result["title"] == selected_title:
-                            selected_entry = selected_title
-                            selected_pageid = result.get("pageid")
-                            logger.info(f"AngelEye: Filter选择了 '{selected_entry}'")
-                            break
-            else:
-                # 未启用过滤器，直接使用第一个搜索结果
-                logger.info("AngelEye: 智能筛选功能已禁用，默认使用第一个搜索结果")
-                selected_entry = search_results[0]["title"]
-                selected_pageid = search_results[0].get("pageid")
-                logger.info(f"AngelEye: 选择了第一个结果 '{selected_entry}'")
-
-        # Case C: 无匹配
-        if not selected_entry:
-            logger.info(f"AngelEye: '{entity_name}' 无相关词条，遵循宁缺毋滥原则")
-            return None
-
-        # 3. 检查原始页面内容的缓存
-        cache_key = build_doc_key(source, selected_entry)
-        cached_content = await get(cache_key)
-
-        if cached_content:
-            logger.debug(f"AngelEye: 命中原始页面缓存 (Key: {cache_key})")
-            full_content = cached_content
-        else:
-            logger.info(f"AngelEye: 缓存未命中，获取 '{selected_entry}' 的全文内容...")
-            # 选择对应的客户端 (如果之前没有选择过)
-            if 'client' not in locals():
-                client = self._get_client(source)
-                if not client:
-                    logger.warning(f"AngelEye: 不支持的数据源 '{source}'")
-                    return None
-
-            # 获取选中词条的全文
-            full_content = await client.get_page_content(selected_entry, pageid=selected_pageid)
-            if not full_content:
-                logger.warning(f"AngelEye: 无法获取 '{selected_entry}' 的内容")
-                return None
-            else:
-                # 成功获取后，立即缓存原始内容，以便下次快速复用
-                logger.debug(f"AngelEye: 成功获取 '{selected_entry}' 的全文，存入缓存...")
-                await set(cache_key, full_content)
-
-
-        # 4. 内容过长则根据开关决定是否调用AI进行归纳，否则只做清洗
-        if len(full_content) > self.TEXT_LENGTH_THRESHOLD:
-            if self.config.get("wiki_summarizer_enabled", True):
-                logger.info(f"AngelEye: 内容过长 ({len(full_content)} > {self.TEXT_LENGTH_THRESHOLD})，调用Summarizer进行摘要...")
-                final_content = await self.summarizer.summarize(
-                    source=source,
-                    full_content=full_content,
-                    entity_name=selected_entry,
-                    dialogue=formatted_dialogue
-                )
-            else:
-                logger.info(f"AngelEye: 内容过长 ({len(full_content)} > {self.TEXT_LENGTH_THRESHOLD})，但摘要功能已禁用，直接使用清洗后原文...")
-                final_content = clean_wikitext(full_content)
-        else:
-            final_content = clean_wikitext(full_content) # 如果内容不长，只做清洗
-
-        # 5. 构建并返回 KnowledgeChunk
-        if final_content:
-            return KnowledgeChunk(
-                source=source,
-                entity=entity_name,
-                content=final_content,
-                source_url=search_results[0].get("url") if search_results else None
-            )
-
-        return None
+    def _ensure_qq_history_service(self):
+        """确保 QQ 聊天记录服务已初始化"""
+        if self.qq_history_service is None:
+            self.qq_history_service = QQChatHistoryService()
+        return self.qq_history_service
 
     def _get_client(self, source: str):
         """
         根据数据源名称获取对应的客户端
 
         :param source: 数据源名称
-        :return: 对应的客户端实例，对于 qq_chat_history 返回其 retriever 实例
+        :return: 对应的客户端实例，对于 qq_chat_history 返回其服务实例
         """
         if source == "wikipedia":
             return self.wikipedia_client
         elif source == "moegirl":
             return self.moegirl_client
         elif source == "qq_chat_history":
-            # 对于 qq_chat_history，我们返回其专用的 retriever 实例
-            return self.qq_chat_history_retriever
+            # 对于 qq_chat_history，我们返回其专用的服务实例
+            return self._ensure_qq_history_service()
         else:
             return None
 
@@ -509,8 +405,7 @@ class SmartRetriever:
         :return: 知识片段，如果未找到则返回None
         """
         # 确保服务已初始化
-        if self.qq_history_service is None:
-            self.qq_history_service = QQChatHistoryService()
+        self._ensure_qq_history_service()
 
         # 从 parameters 中提取参数
         hours = parameters.get("time_range_hours")
@@ -587,14 +482,13 @@ class SmartRetriever:
         :return: 知识片段，如果未找到则返回None
         """
         # 确保服务已初始化
-        if self.qq_history_service is None:
-            self.qq_history_service = QQChatHistoryService()
+        self._ensure_qq_history_service()
 
         # 从参数中提取信息
         hours = chat_params.get("time_range_hours")
         filter_user_ids = chat_params.get("filter_user_ids", [])
         keywords = chat_params.get("keywords", [])
-        
+
         # 从 event 对象中获取 bot 和 group_id
         bot = event.bot
         group_id = event.get_group_id()
@@ -634,7 +528,7 @@ class SmartRetriever:
                 )
                 if not final_content:
                     logger.warning("AngelEye: 聊天记录分析失败，返回原始记录摘要。")
-                    final_content = f"聊天记录摘要：\n" + historical_chat[:500] + "..."
+                    final_content = "聊天记录摘要：\n" + historical_chat[:500] + "..."
             else:
                 logger.info("AngelEye: 摘要功能已禁用，直接返回原文。")
                 final_content = historical_chat

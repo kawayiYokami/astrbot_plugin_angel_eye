@@ -2,9 +2,7 @@
 Angel Eye 插件主入口
 实现轻量级指令驱动的知识获取架构
 """
-import asyncio
-import json
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple
 import astrbot.api.star as star
 import astrbot.api.event.filter as filter
 from astrbot.api.event import AstrMessageEvent
@@ -71,7 +69,7 @@ class AngelEyePlugin(star.Star):
         logger.info("AngelEye: 使用 Astar 原生上下文")
         return formatted
 
-    @filter.on_llm_request(priority=-50)
+    @filter.on_llm_request(priority=30)
     async def enrich_context_before_llm_call(self, event: AstrMessageEvent, req: ProviderRequest):
         """
         在主模型请求前，执行上下文增强逻辑
@@ -350,21 +348,14 @@ class AngelEyePlugin(star.Star):
             logger.info("AngelEye: 背景知识为空，流程结束。")
             return
 
-        # 构建注入文本
-        persona_names_str = self.config.get("persona_name", "fairy|仙灵")
-        all_personas = [name.strip() for name in persona_names_str.split('|')]
-        persona_list_str = "、".join(all_personas)
-
-        injection_text = (
-            f"\n\n---\n"
-            f"[天使之眼] 我的别名是 {persona_list_str}。"
-            f"如下是我脑海中浮现出的上下文可能相关的信息，仅作参考。\n\n"
-            f"[相关信息参考]:\n{background_knowledge}\n"
-            f"---"
-        )
+        # 构建注入文本，使用[RAG-百科]标识
+        rag_content = f"[RAG-百科] 相关信息参考:\n{background_knowledge}"
 
         logger.info("AngelEye: 步骤 3/3 - 准备注入上下文")
         logger.debug(f"  - 注入的背景知识内容: {background_knowledge[:50]}...")
 
-        # 执行注入
-        req.system_prompt = (req.system_prompt or '') + injection_text
+        # 将百科内容作为新的用户消息添加到上下文末尾
+        req.contexts.append({
+            "role": "user",
+            "content": rag_content
+        })
