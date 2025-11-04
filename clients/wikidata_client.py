@@ -144,7 +144,6 @@ class WikidataClient:
                         key = item.get("label", item.get("id", entity_name))
                         results["entities"][key] = item
             else:
-                logger.warning(f"AngelEye[WikidataClient]: 未找到实体 '{entity_name}'。")
                 results["entities"][entity_name] = None
 
         # 3.2 决策：统计每个实体的出现次数，选择出现次数最多的
@@ -195,7 +194,6 @@ class WikidataClient:
                 else:
                     logger.warning(f"AngelEye[WikidataClient]: 属性 '{prop_name}' 的结果缺少ID字段。")
             else:
-                logger.warning(f"AngelEye[WikidataClient]: 未找到属性 '{prop_name}'。")
                 results["properties"][prop_name] = None
 
         # 6. 如果找到了实体和属性，则获取最终的事实
@@ -324,7 +322,6 @@ class WikidataClient:
                         return item
                 # 如果没有更好的匹配，返回第一个结果
                 return data["search"][0]
-            logger.debug(f"AngelEye[WikidataClient]: No search results found for keyword '{keyword}'")
             return None
 
         except httpx.HTTPStatusError as e:
@@ -538,7 +535,6 @@ class WikidataClient:
         # 1. 实体链接
         entity = await self.search_entity(entity_name, context_hint=context_hint)
         if not entity:
-            logger.warning(f"AngelEye[WikidataClient]: 未找到实体 '{entity_name}'")
             return results
 
         entity_qid = entity.get("id") or entity.get("title") # API返回的实体ID字段可能是 'id' 或 'title'
@@ -553,7 +549,7 @@ class WikidataClient:
                 fact_name_to_pid[fact_name] = prop["id"]
                 logger.debug(f"AngelEye[WikidataClient]: 属性链接成功 '{fact_name}' -> {prop['label']} ({prop['id']})")
             else:
-                logger.warning(f"AngelEye[WikidataClient]: 未找到属性 '{fact_name}'")
+                pass
 
         if not fact_name_to_pid:
             return results

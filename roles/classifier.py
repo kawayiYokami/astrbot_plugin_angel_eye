@@ -16,6 +16,11 @@ from ..core.exceptions import ParsingError, AngelEyeError
 from ..core.json_parser import safe_extract_json
 from ..core.context.small_model_prompt_builder import SmallModelPromptBuilder
 
+try:
+    import tiktoken
+except ImportError:
+    tiktoken = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,6 +39,20 @@ class Classifier:
         """
         self.provider = provider
         self.config = config
+
+        # 设置最大上下文长度（默认 10 * 1024 = 10240 tokens）
+        max_tokens_k = self.config.get("max_classifier_tokens_k", 10)
+        self.max_tokens = max_tokens_k * 1024
+        # 初始化tiktoken编码器
+        try:
+            if tiktoken:
+                self.encoding = tiktoken.get_encoding("cl100k_base")
+            else:
+                self.encoding = None
+                logger.warning("AngelEye[Classifier]: tiktoken 未安装，不进行内容截断。")
+        except Exception:
+            logger.warning("AngelEye[Classifier]: tiktoken 初始化失败，不进行内容截断。")
+            self.encoding = None
 
         # 根据模型是否为“思考模型”来决定使用哪个提示词
         is_thought_model = self.config.get("is_classifier_thought_model", False)
@@ -87,6 +106,16 @@ class Classifier:
         dialogue_parts.append(f"[用户]{current_prompt}")
 
         formatted_dialogue = "\n".join(dialogue_parts)
+
+        # 截断对话内容以符合10K tokens限制
+        if self.encoding:
+            tokens = self.encoding.encode(formatted_dialogue)
+            if len(tokens) > self.max_tokens:
+                # 从末尾截取，保留最新的对话内容
+                truncated_tokens = tokens[-self.max_tokens:]
+                formatted_dialogue = self.encoding.decode(truncated_tokens)
+                logger.debug(f"AngelEye[Classifier]: 对话内容已截断至 {self.max_tokens} tokens")
+
         # 使用统一的注入方法
         final_prompt = SmallModelPromptBuilder.inject_dialogue_into_template(
             self.prompt_template,

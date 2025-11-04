@@ -54,6 +54,12 @@ class BaseWikiClient(ABC):
         except httpx.TimeoutException as e:
             logger.error(f"AngelEye[{self.site_name}]: 请求超时: {e}")
             return None
+        except httpx.ConnectError as e:
+            logger.error(f"AngelEye[{self.site_name}]: 网络连接错误: {e}")
+            return None
+        except httpx.RequestError as e:
+            logger.error(f"AngelEye[{self.site_name}]: 请求错误: {e}")
+            return None
         except Exception as e:
             logger.error(f"AngelEye[{self.site_name}]: 发生未知错误: {e}", exc_info=True)
             return None
