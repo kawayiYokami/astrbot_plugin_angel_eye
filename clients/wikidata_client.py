@@ -46,7 +46,7 @@ class WikidataClient:
             if len(parts) != 2:
                 logger.warning(f"AngelEye[WikidataClient]: 无法解析的查询目标对: '{pair}'，跳过。")
                 continue
-                
+
             entity_part = parts[0].strip()
             property_part = parts[1].strip()
 
@@ -67,9 +67,9 @@ class WikidataClient:
         :return: 一个英文关键词列表。
         """
         if not filter_str or not isinstance(filter_str, str):
-            logger.warning(f"AngelEye[WikidataClient]: 无效的 filter_keywords_en 字符串输入: {filter_str}")
+            # 空字符串是正常情况，不需要任何日志输出
             return []
-            
+
         # 按 '|' 分隔，并去除每个关键词的首尾空格
         keywords = [kw.strip() for kw in filter_str.split('|') if kw.strip()]
         logger.debug(f"AngelEye[WikidataClient]: 解析过滤关键词完成: {keywords}")
@@ -117,9 +117,9 @@ class WikidataClient:
             self.search_entity(name, context_hint="|".join(filter_keywords) if filter_keywords else None)
             for name in entity_names
         ]
-        
+
         logger.debug(f"AngelEye[WikidataClient]: 创建了 {len(entity_search_tasks)} 个实体搜索任务。")
-        
+
         # 等待所有实体搜索任务完成
         entity_results = await asyncio.gather(*entity_search_tasks, return_exceptions=True)
 
@@ -157,7 +157,7 @@ class WikidataClient:
                 if qid not in candidate_counts:
                     candidate_counts[qid] = {'item': candidate, 'count': 0}
                 candidate_counts[qid]['count'] += 1
-            
+
             if candidate_counts:
                 # 按出现次数降序排序，次数相同时保持原有顺序（Wikidata的排序）
                 sorted_by_count = sorted(candidate_counts.values(), key=lambda x: x['count'], reverse=True)
@@ -167,7 +167,7 @@ class WikidataClient:
         # 4. 并发搜索属性
         property_search_tasks = [self.search_property(name) for name in property_names]
         logger.debug(f"AngelEye[WikidataClient]: 创建了 {len(property_search_tasks)} 个属性搜索任务。")
-        
+
         # 等待所有属性搜索任务完成
         property_results = await asyncio.gather(*property_search_tasks, return_exceptions=True)
 
@@ -200,14 +200,14 @@ class WikidataClient:
         if best_entity and unique_properties:
             entity_qid = best_entity.get("id")
             logger.info(f"AngelEye[WikidataClient]: 选定实体 '{best_entity.get('label')}' ({entity_qid}) 进行事实查询。")
-            
+
             # 获取实体详情
             entity_details = await self.get_entity_details([entity_qid])
             if entity_details and "entities" in entity_details:
                 entity_data = entity_details["entities"].get(entity_qid)
                 if entity_data:
                     claims = entity_data.get("claims", {})
-                    
+
                     # 为每个唯一属性提取所有事实值
                     for prop_id, prop_info in unique_properties.items():
                         claim_list = claims.get(prop_id)
@@ -216,7 +216,7 @@ class WikidataClient:
                             all_values = []
                             for claim in claim_list:
                                 parsed_value = self.parse_claim_value(claim)
-                                
+
                                 # 根据值的类型进行最终格式化
                                 final_value = "N/A"
                                 if parsed_value["type"] == "entity":
@@ -234,10 +234,10 @@ class WikidataClient:
                                     final_value = f"纬度 {parsed_value['latitude']}, 经度 {parsed_value['longitude']}"
                                 else:
                                     final_value = parsed_value.get("value", "N/A")
-                                
+
                                 if final_value != "N/A":
                                     all_values.append(final_value)
-                            
+
                             # 将所有值格式化为一个字符串，用逗号分隔
                             if all_values:
                                 final_value_str = ", ".join(all_values)
