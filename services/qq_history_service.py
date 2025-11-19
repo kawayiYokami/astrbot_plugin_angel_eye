@@ -8,10 +8,13 @@ import logging
 from typing import List, Dict, Optional, TYPE_CHECKING
 from dataclasses import dataclass
 
-from ..core.cache_manager import get, set as set_cache
 from ..core.formatter import format_unified_message # 导入新的格式化工具
 
-logger = logging.getLogger(__name__)
+# 导入 logger
+try:
+    from astrbot.api import logger
+except ImportError:
+    logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from astrbot.api import Bot
@@ -42,9 +45,6 @@ class QQChatHistoryService:
         self.self_id: Optional[str] = None
         self.config = FetchConfig()
 
-    def _build_cache_key(self, group_id: str) -> str:
-        """为聊天记录构建唯一的缓存键"""
-        return f"history:{group_id}"
 
     async def get_messages(
         self,
@@ -56,10 +56,7 @@ class QQChatHistoryService:
         keywords: Optional[List[str]] = None
     ) -> List[str]:
         """
-        核心逻辑：使用三阶段取货模型获取并格式化 QQ 群聊历史记录 (KISS V10)
-        阶段一: 从服务器取第一批数据 (冷启动)。
-        阶段二: 循环消耗本地缓存。
-        阶段三: 循环消耗服务器。
+        核心逻辑：直接从服务器获取并格式化 QQ 群聊历史记录。
         """
         # 1. 获取机器人自身的ID
         if self.self_id is None:
@@ -68,13 +65,10 @@ class QQChatHistoryService:
         # 2. 初始化获取状态和配置
         state = self._prepare_fetch_state(group_id, hours)
 
-        # 3. 加载缓存数据
-        await self._load_cached_messages(group_id, state)
+        # 3. 直接从服务器获取数据
+        await self._fetch_from_server(bot, group_id, state, count)
 
-        # 4. 执行三阶段获取流程
-        await self._execute_three_stage_fetch(bot, group_id, state, count)
-
-        # 5. 最终处理和格式化
+        # 4. 最终处理和格式化
         return await self._finalize_and_format_messages(
             group_id, state, filter_user_ids, keywords
         )
@@ -100,98 +94,11 @@ class QQChatHistoryService:
             start_timestamp=start_timestamp
         )
 
-    async def _load_cached_messages(self, group_id: str, state: FetchState) -> None:
-        """加载缓存消息到状态"""
-        cache_key = self._build_cache_key(group_id)
-        cached_raw_messages: List[Dict] = await get(cache_key) or []
-
-        if cached_raw_messages:
-            state.messages.extend(cached_raw_messages)
-            state.processed_ids.update(msg.get("message_id") for msg in cached_raw_messages)
-            logger.debug(f"AngelEye: 群 {group_id}: 缓存命中 {len(state.messages)} 条消息。")
-
-    async def _execute_three_stage_fetch(
+    async def _fetch_from_server(
         self, bot: 'Bot', group_id: str, state: FetchState, count: Optional[int]
     ) -> None:
-        """执行三阶段获取流程"""
-        # 阶段一：从服务器取第一批数据 (冷启动)
-        await self._stage_one_fetch_from_server(bot, group_id, state)
-
-        if self._should_finalize(state, count):
-            return
-
-        # 阶段二：循环消耗本地缓存
-        await self._stage_two_consume_cache(group_id, state, count)
-
-        if self._should_finalize(state, count):
-            return
-
-        # 阶段三：循环消耗服务器
-        await self._stage_three_consume_server(bot, group_id, state, count)
-
-    async def _stage_one_fetch_from_server(self, bot: 'Bot', group_id: str, state: FetchState) -> None:
-        """阶段一：从服务器取第一批数据"""
-        logger.debug(f"AngelEye: 群 {group_id}: 阶段一 - 从服务器取第一批数据 (cursor_id={state.cursor_id})...")
-
-        try:
-            payloads = {"group_id": int(group_id), "message_seq": state.cursor_id, "reverseOrder": True}
-            result = await bot.api.call_action("get_group_msg_history", **payloads)
-
-            if not result or "messages" not in result:
-                raise ValueError(f"API返回无效结果: {result}")
-
-            messages = result.get("messages", [])
-            new_messages = [msg for msg in messages if msg.get("message_id") not in state.processed_ids]
-
-            if new_messages:
-                state.messages.extend(new_messages)
-                state.processed_ids.update(msg.get("message_id") for msg in new_messages)
-                state.cursor_id = messages[0]["message_id"]
-                logger.debug(f"AngelEye: 阶段一完成，获取 {len(new_messages)} 条新消息，新游标: {state.cursor_id}")
-            else:
-                logger.debug("AngelEye: 阶段一未获取到新消息。")
-
-        except Exception as e:
-            logger.error(f"AngelEye: 阶段一取货失败: {e}")
-
-    async def _stage_two_consume_cache(self, group_id: str, state: FetchState, count: Optional[int]) -> None:
-        """阶段二：循环消耗本地缓存"""
-        logger.debug(f"AngelEye: 群 {group_id}: 阶段二 - 循环消耗本地缓存...")
-
-        cache_key = self._build_cache_key(group_id)
-        cached_raw_messages: List[Dict] = await get(cache_key) or []
-        id_to_index_map = {msg.get("message_id"): i for i, msg in enumerate(cached_raw_messages)}
-
-        while True:
-            previous_count = len(state.processed_ids)
-
-            found_index = id_to_index_map.get(state.cursor_id, -1)
-            if found_index == -1:
-                logger.debug(f"AngelEye: 本地缓存中未找到游标 {state.cursor_id}，结束本地阶段。")
-                break
-
-            start_slice = max(0, found_index - self.config.local_batch_size)
-            message_slice = cached_raw_messages[start_slice:found_index]
-            local_round_messages = message_slice[::-1]  # 颠倒以模拟服务器行为
-
-            if not local_round_messages:
-                logger.debug("AngelEye: 本地货架返回空列表，结束本地阶段。")
-                break
-
-            new_messages = [msg for msg in local_round_messages if msg.get("message_id") not in state.processed_ids]
-            if new_messages:
-                state.messages.extend(new_messages)
-                state.processed_ids.update(msg.get("message_id") for msg in new_messages)
-
-            if self._should_exit_stage(state, count, previous_count):
-                break
-
-            state.cursor_id = local_round_messages[0]['message_id']
-            logger.debug(f"AngelEye: 本地阶段更新游标: {state.cursor_id}, 新增: {len(state.processed_ids) - previous_count}")
-
-    async def _stage_three_consume_server(self, bot: 'Bot', group_id: str, state: FetchState, count: Optional[int]) -> None:
-        """阶段三：循环消耗服务器"""
-        logger.debug(f"AngelEye: 群 {group_id}: 阶段三 - 循环消耗服务器...")
+        """直接从服务器循环获取数据，直到满足条件"""
+        logger.info(f"AngelEye: 群 {group_id}: 开始从服务器获取聊天记录...")
 
         while True:
             previous_count = len(state.processed_ids)
@@ -209,7 +116,7 @@ class QQChatHistoryService:
                 state.sync_page_count += 1
 
                 if not server_messages:
-                    logger.info("AngelEye: 服务器返回空列表，历史记录同步完成。")
+                    logger.info("AngelEye: 服务器返回空列表，历史记录获取完成。")
                     break
 
                 new_messages = [msg for msg in server_messages if msg.get("message_id") not in state.processed_ids]
@@ -221,7 +128,7 @@ class QQChatHistoryService:
                 logger.error(f"AngelEye: 从服务器取货失败: {e}")
                 state.consecutive_failures += 1
                 if state.consecutive_failures >= self.config.max_failures:
-                    logger.error(f"AngelEye: 连续失败 {self.config.max_failures} 次，停止服务器阶段。")
+                    logger.error(f"AngelEye: 连续失败 {self.config.max_failures} 次，停止获取。")
                     break
                 await asyncio.sleep(1)
                 continue
@@ -276,14 +183,10 @@ class QQChatHistoryService:
         keywords: Optional[List[str]]
     ) -> List[str]:
         """最终处理、过滤和格式化消息"""
-        logger.info(f"AngelEye: 同步完成，共获取 {len(state.messages)} 条消息，准备排序和缓存。")
+        logger.info(f"AngelEye: 获取完成，共获取 {len(state.messages)} 条消息，准备排序和过滤。")
 
         # 按时间升序排序
         sorted_messages = sorted(state.messages, key=lambda m: m.get('time', 0))
-
-        # 缓存完整消息列表
-        cache_key = self._build_cache_key(group_id)
-        await set_cache(cache_key, sorted_messages)
 
         # --- 应用过滤条件 ---
         sorted_messages = self._apply_all_filters(sorted_messages, state.start_timestamp, filter_user_ids, keywords)
