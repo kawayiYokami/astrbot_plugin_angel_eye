@@ -1,5 +1,5 @@
 name: astrbot_plugin_angel_eye
-description: 在调用大模型之前，通过小模型识别对话中的专有名词并链接百科知识，为大模型补充上下文，提高见识面，并且通过维基数据降低大幅幻觉率。
+description: 一个为 AstrBot 设计的函数工具插件，允许大语言模型（LLM）直接查询当前群聊的聊天记录。
 author: kawayiYokami
-version: 1.0.1
+version: 1.0.2
 repo: https://github.com/kawayiYokami/astrbot_plugin_angel_eye
