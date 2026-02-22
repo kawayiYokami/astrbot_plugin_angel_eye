@@ -176,8 +176,12 @@ def format_unified_message(message_dict: Dict[str, Any], self_id: str = None) ->
             content_str = "".join(content_parts)
         
         # 4. 拼接最终字符串 (仅适用于QQ API消息)
-        # 格式: [角色]昵称(ID) [可选的时间]: 内容
-        formatted_text = f"{role_display}{nickname}({sender_id}){time_str}: {content_str}"
+        # 格式: 每行一个元素，便于LLM识别
+        # [时间][群友(QQ号)]
+        # <昵称>
+        # 内容
+        # </昵称>
+        formatted_text = f"{time_str}[{role_display.replace('[', '').replace(']', '')}({sender_id})]\n<{nickname}>\n{content_str}\n</{nickname}>"
         return formatted_text
     except Exception as e:
         # 发生任何错误时，返回一个错误标识，避免整个流程中断

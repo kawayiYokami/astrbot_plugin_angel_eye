@@ -1,5 +1,6 @@
 name: astrbot_plugin_angel_eye
+display_name: QQ群聊查询工具
 description: 一个为 AstrBot 设计的函数工具插件，允许大语言模型（LLM）直接查询当前群聊的聊天记录。
 author: kawayiYokami
-version: 1.0.3
+version: 1.0.4
 repo: https://github.com/kawayiYokami/astrbot_plugin_angel_eye

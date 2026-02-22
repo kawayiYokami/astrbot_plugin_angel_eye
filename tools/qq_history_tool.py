@@ -4,7 +4,6 @@
 """
 
 import logging
-from astrbot.api.star import Context
 from astrbot.api.event import AstrMessageEvent
 from astrbot.api import FunctionTool
 from dataclasses import dataclass, field
@@ -32,11 +31,11 @@ class QQHistorySearchTool(FunctionTool):
                 "keywords": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "用于筛选消息的关键词列表。例如：['天气', 'AstrBot']",
+                    "description": "用于筛选消息的关键词列表（OR逻辑：包含任意一个关键词即匹配）。支持搜索消息正文、发送者QQ号、发送者昵称。例如：['关键词', '123456789', '昵称']",
                 },
                 "hours": {
                     "type": "number",
-                    "description": "查询过去多少小时内的聊天记录。例如：24 表示查询过去24小时。",
+                    "description": "查询过去多少小时内的聊天记录。例如：24 表示查询过去24小时（1天），168为1周，720为1月，8760为1年。",
                 },
                 "count": {
                     "type": "integer",
@@ -109,5 +108,5 @@ class QQHistorySearchTool(FunctionTool):
         if not formatted_messages:
             return "在指定的条件下没有找到相关的聊天记录。"
         else:
-            # 将消息列表合并成一个长字符串，便于 LLM 理解
-            return "\n".join(formatted_messages)
+            # 将消息列表合并成一个长字符串，每条消息之间用两个换行符隔开
+            return "\n\n".join(formatted_messages)
