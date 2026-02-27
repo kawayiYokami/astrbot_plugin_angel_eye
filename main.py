@@ -17,7 +17,7 @@ except ImportError:
     "astrbot_plugin_angel_eye",
     "kawayiYokami",
     "一个为 AstrBot 设计的函数工具插件，允许大语言模型（LLM）直接查询当前群聊的聊天记录。",
-    "1.0.2",
+    "1.0.5",
     "https://github.com/kawayiYokami/astrbot_plugin_angel_eye"
 )
 class AngelEyePlugin(Star):
@@ -48,5 +48,10 @@ class AngelEyePlugin(Star):
             logger.info("AngelEyePlugin: QQHistorySearchTool 已取消注册。")
         except Exception as e:
             logger.warning(f"AngelEyePlugin: 取消注册工具时出错: {e}")
+        try:
+            self.qq_history_tool.history_service.close()
+            logger.info("AngelEyePlugin: QQ 历史仓储连接已关闭。")
+        except Exception as e:
+            logger.warning(f"AngelEyePlugin: 关闭历史仓储连接时出错: {e}")
 
         logger.info("AngelEyePlugin: 插件已终止。")

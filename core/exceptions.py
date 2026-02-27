@@ -21,3 +21,8 @@ class ParsingError(AngelEyeError):
 class ValidationError(AngelEyeError):
     """输入验证错误"""
     pass
+
+
+class ResourceBusyError(AngelEyeError):
+    """资源忙碌，例如同群并发同步冲突"""
+    pass

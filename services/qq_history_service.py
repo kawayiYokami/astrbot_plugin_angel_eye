@@ -1,14 +1,20 @@
 """
 Angel Eye 插件 - QQ 群聊历史服务
-负责获取、格式化和缓存 QQ 群聊历史记录
+实现本地缓存优先 + 头部/尾部增量同步
 """
-import asyncio
-from datetime import datetime, timedelta
-import logging
-from typing import List, Dict, Optional, TYPE_CHECKING
-from dataclasses import dataclass
 
-from ..core.formatter import format_unified_message # 导入新的格式化工具
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, TYPE_CHECKING
+
+from ..core.exceptions import ResourceBusyError
+from ..core.formatter import format_unified_message
+from .history_repository import HistoryRepository, SyncState
 
 # 导入 logger
 try:
@@ -19,369 +25,448 @@ except ImportError:
 if TYPE_CHECKING:
     from astrbot.api import Bot
 
+
 @dataclass
 class FetchConfig:
-    """获取配置类，替代硬编码的Magic Numbers"""
     max_failures: int = 3
-    max_sync_pages: int = 20
     server_call_delay: float = 0.1
-    local_batch_size: int = 20
+    history_exhausted_no_progress_pages: int = 3
+    default_hours: int = 24
+    default_limit: int = 50
+    max_limit: int = 500
+
 
 @dataclass
-class FetchState:
-    """获取状态管理类"""
-    processed_ids: set[str]
-    messages: List[Dict]
-    filtered_messages: List[Dict]  # 过滤后的消息列表
-    cursor_id: int
-    consecutive_failures: int
-    sync_page_count: int
-    start_timestamp: Optional[int]
-    filter_user_ids: Optional[List[int]]
-    keywords: Optional[List[str]]
+class SyncResult:
+    direction: str
+    pages_fetched: int
+    inserted_count: int
+    stop_reason: str
+
+
+@dataclass
+class HistoryQueryResult:
+    formatted_messages: List[str]
+    total_in_range: int
+    returned_count: int
+    remaining_in_range: int
+    query_start: int
+    query_end: int
+    covered_from: Optional[int]
+    covered_to: Optional[int]
+    coverage_status: str
+    history_exhausted: bool
+    stop_reasons: List[str]
+
 
 class QQChatHistoryService:
-    """QQ 群聊历史服务，实现增量更新和缓存管理"""
+    """QQ 群聊历史服务，实现本地缓存与增量同步。"""
 
     def __init__(self):
-        """初始化服务，self_id 将在首次调用 get_messages 时获取"""
         self.self_id: Optional[str] = None
         self.config = FetchConfig()
-
+        self.repo = HistoryRepository()
+        self._group_locks: Dict[str, asyncio.Lock] = {}
 
     async def get_messages(
         self,
-        bot: 'Bot',
+        bot: "Bot",
         group_id: str,
         hours: Optional[int] = None,
         count: Optional[int] = None,
         filter_user_ids: Optional[List[int]] = None,
-        keywords: Optional[List[str]] = None
-    ) -> List[str]:
-        """
-        核心逻辑：直接从服务器获取并格式化 QQ 群聊历史记录。
-        """
-        # 1. 获取机器人自身的ID
+        keywords: Optional[List[str]] = None,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
+        limit: Optional[int] = None,
+        slice_expr: Optional[str] = None,
+    ) -> HistoryQueryResult:
         if self.self_id is None:
             self.self_id = await self._initialize_self_id(bot)
 
-        # 2. 初始化获取状态和配置
-        state = self._prepare_fetch_state(group_id, hours, filter_user_ids, keywords)
-
-        # 3. 直接从服务器获取数据（带增量过滤）
-        await self._fetch_from_server(bot, group_id, state, count)
-
-        # 4. 最终处理和格式化
-        return await self._finalize_and_format_messages(
-            group_id, state, filter_user_ids, keywords
+        query_start, query_end, query_limit, query_offset, query_from_latest = self._normalize_query_params(
+            hours=hours,
+            count=count,
+            start_time=start_time,
+            end_time=end_time,
+            limit=limit,
+            slice_expr=slice_expr,
         )
 
-    async def _initialize_self_id(self, bot: 'Bot') -> str:
-        """初始化机器人自身ID"""
+        group_lock = self._group_locks.get(group_id)
+        if group_lock is None:
+            group_lock = asyncio.Lock()
+            self._group_locks[group_id] = group_lock
+
+        if group_lock.locked():
+            logger.warning("AngelEye[busy]: group_id=%s 当前有同步任务进行中，直接返回忙碌。", group_id)
+            raise ResourceBusyError("当前群聊历史同步忙碌中，请稍后再试。")
+        stop_reasons: List[str] = []
+
+        await group_lock.acquire()
+        try:
+            initial_state = self.repo.get_sync_state(group_id)
+            head_result = await self._head_fill(bot, group_id, initial_state, query_start)
+            stop_reasons.append(f"head:{head_result.stop_reason}")
+
+            state_after_head = self.repo.update_coverage_from_messages(group_id)
+            needs_tail = state_after_head.covered_from is None or query_start < state_after_head.covered_from
+
+            if needs_tail:
+                tail_result = await self._tail_fill(bot, group_id, query_start, state_after_head)
+                stop_reasons.append(f"tail:{tail_result.stop_reason}")
+
+            final_state = self.repo.update_coverage_from_messages(group_id)
+
+            local_messages = self.repo.query_messages(
+                group_id=group_id,
+                start_time=query_start,
+                end_time=query_end,
+                keywords=keywords,
+                user_ids=filter_user_ids,
+                limit=query_limit,
+                offset=query_offset,
+                from_latest=query_from_latest,
+            )
+            total_in_range = self.repo.count_messages_in_range(
+                group_id=group_id,
+                start_time=query_start,
+                end_time=query_end,
+                keywords=keywords,
+                user_ids=filter_user_ids,
+            )
+        finally:
+            group_lock.release()
+
+        formatted_messages = self._format_messages(local_messages)
+        returned_count = len(formatted_messages)
+        remaining_in_range = max(total_in_range - returned_count, 0)
+        coverage_status = self._determine_coverage_status(query_start, query_end, final_state)
+
+        logger.info(
+            "AngelEye[query]: group_id=%s query_range=(%s,%s) covered_range=(%s,%s) coverage=%s result_count=%s",
+            group_id,
+            query_start,
+            query_end,
+            final_state.covered_from,
+            final_state.covered_to,
+            coverage_status,
+            len(formatted_messages),
+        )
+
+        return HistoryQueryResult(
+            formatted_messages=formatted_messages,
+            total_in_range=total_in_range,
+            returned_count=returned_count,
+            remaining_in_range=remaining_in_range,
+            query_start=query_start,
+            query_end=query_end,
+            covered_from=final_state.covered_from,
+            covered_to=final_state.covered_to,
+            coverage_status=coverage_status,
+            history_exhausted=final_state.history_exhausted,
+            stop_reasons=stop_reasons,
+        )
+
+    async def _initialize_self_id(self, bot: "Bot") -> str:
         try:
             login_info = await bot.api.call_action("get_login_info")
             return str(login_info.get("user_id"))
-        except Exception as e:
-            logger.error(f"AngelEye[QQChatHistoryService]: 获取机器人ID失败: {e}")
+        except Exception as exc:
+            logger.error("AngelEye[QQChatHistoryService]: 获取机器人ID失败: %s", exc)
             return "-1"
 
-    def _prepare_fetch_state(self, group_id: str, hours: Optional[int], filter_user_ids: Optional[List[int]] = None, keywords: Optional[List[str]] = None) -> FetchState:
-        """准备获取状态"""
-        start_timestamp = int((datetime.now() - timedelta(hours=hours)).timestamp()) if hours is not None else None
-        return FetchState(
-            processed_ids=set(),
-            messages=[],
-            filtered_messages=[],
-            cursor_id=0,
-            consecutive_failures=0,
-            sync_page_count=0,
-            start_timestamp=start_timestamp,
-            filter_user_ids=filter_user_ids,
-            keywords=keywords
-        )
+    def _normalize_query_params(
+        self,
+        hours: Optional[int],
+        count: Optional[int],
+        start_time: Optional[int],
+        end_time: Optional[int],
+        limit: Optional[int],
+        slice_expr: Optional[str],
+    ) -> tuple[int, int, int, int, bool]:
+        now_ts = int(time.time())
 
-    async def _fetch_from_server(
-        self, bot: 'Bot', group_id: str, state: FetchState, count: Optional[int]
-    ) -> None:
-        """直接从服务器循环获取数据，直到满足条件（带增量过滤）"""
-        logger.info(f"AngelEye: 群 {group_id}: 开始从服务器获取聊天记录...")
+        if end_time is None:
+            end_time = now_ts
+        else:
+            end_time = min(int(end_time), now_ts)
 
-        # 判断是否需要进行增量过滤
-        has_filters = state.filter_user_ids is not None or state.keywords is not None
+        if start_time is None:
+            if hours is not None:
+                start_time = int((datetime.now() - timedelta(hours=float(hours))).timestamp())
+            else:
+                start_time = int((datetime.now() - timedelta(hours=self.config.default_hours)).timestamp())
+        else:
+            start_time = int(start_time)
+
+        if start_time > end_time:
+            raise ValueError("start_time 不能晚于 end_time")
+
+        requested_limit = limit if limit is not None else count
+        if requested_limit is None:
+            requested_limit = self.config.default_limit
+        query_limit = max(1, min(int(requested_limit), self.config.max_limit))
+
+        slice_limit, slice_offset, from_latest = self._parse_slice_expr(slice_expr, query_limit)
+        return start_time, end_time, slice_limit, slice_offset, from_latest
+
+    def _parse_slice_expr(self, slice_expr: Optional[str], default_limit: int) -> tuple[int, int, bool]:
+        if slice_expr is None:
+            return default_limit, 0, False
+
+        text = slice_expr.strip()
+        if not text:
+            raise ValueError("slice 不能为空")
+
+        if text.isdigit():
+            n = int(text)
+            if n <= 0:
+                raise ValueError("slice 数字必须 > 0")
+            return min(n, self.config.max_limit), 0, True
+
+        if ":" not in text:
+            raise ValueError("slice 格式错误，支持 :N / N: / A:B / N")
+
+        left, right = text.split(":", 1)
+        left = left.strip()
+        right = right.strip()
+
+        if not left and not right:
+            raise ValueError("slice 不能是 ':'")
+
+        if not left:
+            if not right.isdigit() or int(right) <= 0:
+                raise ValueError("slice ':N' 中 N 必须为正整数")
+            return min(int(right), self.config.max_limit), 0, True
+
+        if not right:
+            if not left.isdigit() or int(left) <= 0:
+                raise ValueError("slice 'N:' 中 N 必须为正整数")
+            return min(int(left), self.config.max_limit), 0, False
+
+        if not left.isdigit() or not right.isdigit():
+            raise ValueError("slice 'A:B' 中 A/B 必须为正整数")
+
+        start_idx = int(left)
+        end_idx = int(right)
+        if start_idx <= 0 or end_idx <= 0:
+            raise ValueError("slice 'A:B' 中 A/B 必须 > 0")
+        if start_idx > end_idx:
+            raise ValueError("slice 'A:B' 中 A 不能大于 B")
+
+        length = end_idx - start_idx + 1
+        return min(length, self.config.max_limit), start_idx - 1, False
+
+    async def _head_fill(
+        self,
+        bot: "Bot",
+        group_id: str,
+        state: SyncState,
+        target_start: int,
+    ) -> SyncResult:
+        cursor_id = 0
+        pages_fetched = 0
+        inserted_count = 0
+        consecutive_failures = 0
+        stop_reason = "caught_up"
+
+        is_empty_cache = state.covered_to is None or self.repo.count_messages(group_id) == 0
 
         while True:
-            previous_count = len(state.processed_ids)
-
             try:
-                logger.debug(f"AngelEye: 群 {group_id}: 从服务器取货 (cursor_id={state.cursor_id})...")
-                payloads = {"group_id": int(group_id), "message_seq": state.cursor_id, "reverseOrder": True}
-                result = await bot.api.call_action("get_group_msg_history", **payloads)
-
-                if not result or "messages" not in result:
-                    raise ValueError(f"API返回无效结果: {result}")
-
-                server_messages = result.get("messages", [])
-                state.consecutive_failures = 0
-                state.sync_page_count += 1
-
-                if not server_messages:
-                    logger.info("AngelEye: 服务器返回空列表，历史记录获取完成。")
-                    break
-
-                new_messages = [msg for msg in server_messages if msg.get("message_id") not in state.processed_ids]
-                if new_messages:
-                    state.messages.extend(new_messages)
-                    state.processed_ids.update(msg.get("message_id") for msg in new_messages)
-                    
-                    # 增量过滤：每获取一批消息后立即过滤
-                    if has_filters:
-                        filtered = self._apply_all_filters(
-                            new_messages, 
-                            state.start_timestamp, 
-                            state.filter_user_ids, 
-                            state.keywords
-                        )
-                        state.filtered_messages.extend(filtered)
-                        logger.debug(f"AngelEye: 增量过滤后，当前过滤消息数: {len(state.filtered_messages)}")
-
-            except Exception as e:
-                logger.error(f"AngelEye: 从服务器取货失败: {e}")
-                state.consecutive_failures += 1
-                if state.consecutive_failures >= self.config.max_failures:
-                    logger.error(f"AngelEye: 连续失败 {self.config.max_failures} 次，停止获取。")
+                server_messages = await self._fetch_page(bot, group_id, cursor_id)
+                consecutive_failures = 0
+            except Exception as exc:
+                consecutive_failures += 1
+                logger.error("AngelEye[head]: 群 %s 拉取失败: %s", group_id, exc)
+                if consecutive_failures >= self.config.max_failures:
+                    stop_reason = "failures"
                     break
                 await asyncio.sleep(1)
                 continue
 
-            # 检查是否应该退出
-            if self._should_exit_stage(state, count, previous_count, has_filters):
+            pages_fetched += 1
+            if not server_messages:
+                stop_reason = "empty"
                 break
 
-            state.cursor_id = server_messages[0]['message_id']
-            logger.debug(f"AngelEye: 服务器阶段更新游标: {state.cursor_id}, 新增: {len(state.processed_ids) - previous_count}")
+            page_min_time, page_max_time = self._get_page_time_range(server_messages)
 
-            await asyncio.sleep(self.config.server_call_delay)
-        
-        # 如果有过滤条件，将过滤后的消息作为最终消息
-        if has_filters and not state.filtered_messages and state.messages:
-            # 如果filtered_messages为空但messages不为空，说明没有执行过增量过滤
-            # （可能是has_filters在循环中变为False的情况），这里做一次全量过滤作为兜底
-            state.filtered_messages = self._apply_all_filters(
-                state.messages,
-                state.start_timestamp,
-                state.filter_user_ids,
-                state.keywords
+            insert_result = self.repo.insert_messages(group_id, server_messages)
+            inserted_count += insert_result.inserted_count
+
+            self.repo.upsert_sync_state(
+                group_id=group_id,
+                covered_from=page_min_time,
+                covered_to=page_max_time,
             )
 
-    def _should_finalize(self, state: FetchState, count: Optional[int]) -> bool:
-        """检查是否应该结束整个获取流程"""
-        if count is not None and len(state.messages) >= count:
-            logger.info(f"AngelEye: 消息数量 ({len(state.messages)}) 已满足要求 ({count})，跳过后续阶段。")
-            return True
+            if is_empty_cache and page_min_time <= target_start:
+                stop_reason = "target_reached"
+                break
 
-        if state.start_timestamp and state.messages:
-            earliest_time = min(msg.get('time', 0) for msg in state.messages)
-            if earliest_time < state.start_timestamp:
-                logger.info("AngelEye: 最旧消息已早于时间限制，跳过后续阶段。")
-                return True
+            if insert_result.inserted_count == 0:
+                stop_reason = "caught_up"
+                break
 
-        return False
+            next_cursor = self.repo.extract_anchor(server_messages[0])
+            if next_cursor is None:
+                stop_reason = "cursor_missing"
+                break
+            if pages_fetched > 1 and next_cursor == cursor_id:
+                stop_reason = "cursor_stuck"
+                break
+            cursor_id = next_cursor
+            await asyncio.sleep(self.config.server_call_delay)
 
-    def _should_exit_stage(self, state: FetchState, count: Optional[int], previous_count: int, has_filters: bool = False) -> bool:
-        """检查是否应该退出当前阶段
-        
-        Args:
-            state: 获取状态
-            count: 期望的消息数量
-            previous_count: 上一次的消息数量
-            has_filters: 是否有过滤条件
-        """
-        # 如果有过滤条件，使用过滤后的消息数量来判断
-        if has_filters and count is not None:
-            filtered_count = len(state.filtered_messages)
-            if filtered_count >= count:
-                logger.info(f"AngelEye: 过滤后消息数量 ({filtered_count}) 已满足要求 ({count})，结束当前阶段。")
-                return True
-        
-        # 原有的判断逻辑
-        current_count = len(state.processed_ids)
+        logger.info(
+            "AngelEye[sync]: group_id=%s direction=head pages=%s inserted=%s stop=%s",
+            group_id,
+            pages_fetched,
+            inserted_count,
+            stop_reason,
+        )
+        return SyncResult(
+            direction="head",
+            pages_fetched=pages_fetched,
+            inserted_count=inserted_count,
+            stop_reason=stop_reason,
+        )
 
-        if count is not None and len(state.messages) >= count:
-            logger.info(f"AngelEye: 消息数量 ({len(state.messages)}) 已满足要求 ({count})，结束当前阶段。")
-            return True
-
-        if state.sync_page_count >= self.config.max_sync_pages:
-            logger.warning(f"AngelEye: 达到最大同步页数 ({self.config.max_sync_pages})，结束当前阶段。")
-            return True
-
-        if current_count - previous_count == 0:
-            logger.info("AngelEye: 已无新消息，结束当前阶段。")
-            return True
-
-        return False
-
-    async def _finalize_and_format_messages(
+    async def _tail_fill(
         self,
+        bot: "Bot",
         group_id: str,
-        state: FetchState,
-        filter_user_ids: Optional[List[int]],
-        keywords: Optional[List[str]]
-    ) -> List[str]:
-        """最终处理、过滤和格式化消息"""
-        # 判断是否使用了增量过滤
-        has_filters = filter_user_ids is not None or keywords is not None
-        
-        if has_filters and state.filtered_messages:
-            # 使用增量过滤的结果
-            logger.info(f"AngelEye: 获取完成，共获取 {len(state.messages)} 条消息，增量过滤后剩余 {len(state.filtered_messages)} 条。")
-            sorted_messages = sorted(state.filtered_messages, key=lambda m: m.get('time', 0))
-        else:
-            # 原有的处理逻辑
-            logger.info(f"AngelEye: 获取完成，共获取 {len(state.messages)} 条消息，准备排序和过滤。")
-            sorted_messages = sorted(state.messages, key=lambda m: m.get('time', 0))
-            sorted_messages = self._apply_all_filters(sorted_messages, state.start_timestamp, filter_user_ids, keywords)
+        target_start: int,
+        state: SyncState,
+    ) -> SyncResult:
+        if state.history_exhausted:
+            return SyncResult(direction="tail", pages_fetched=0, inserted_count=0, stop_reason="history_exhausted")
 
-        # 格式化并返回
-        formatted_messages = []
-        for msg in sorted_messages:
+        cursor_id = state.oldest_seq
+        if cursor_id is None:
+            cursor_id = self.repo.rebuild_oldest_seq_from_messages(group_id)
+            if cursor_id is not None:
+                self.repo.upsert_sync_state(group_id=group_id, oldest_seq=cursor_id)
+
+        if cursor_id is None:
+            return SyncResult(direction="tail", pages_fetched=0, inserted_count=0, stop_reason="no_cursor")
+
+        pages_fetched = 0
+        inserted_count = 0
+        consecutive_failures = 0
+        stop_reason = "target_reached"
+
+        no_progress_pages = 0
+        last_oldest_time = state.covered_from
+
+        while True:
             try:
-                formatted_msg = format_unified_message(msg, self.self_id)
-                formatted_messages.append(formatted_msg)
-            except Exception as msg_error:
-                logger.warning(f"AngelEye: 格式化单条消息失败: {msg_error}")
+                server_messages = await self._fetch_page(bot, group_id, cursor_id)
+                consecutive_failures = 0
+            except Exception as exc:
+                consecutive_failures += 1
+                logger.error("AngelEye[tail]: 群 %s 拉取失败: %s", group_id, exc)
+                if consecutive_failures >= self.config.max_failures:
+                    stop_reason = "failures"
+                    break
+                await asyncio.sleep(1)
                 continue
 
-        logger.info(f"AngelEye: 最终返回 {len(formatted_messages)} 条已格式化的消息。")
-        return formatted_messages
+            pages_fetched += 1
+            if not server_messages:
+                stop_reason = "empty"
+                break
 
-    def _apply_filters(
-        self,
-        messages: List[Dict],
-        start_timestamp: Optional[int],
-        filter_user_ids: Optional[List[int]],
-        keywords: Optional[List[str]]
-    ) -> List[Dict]:
-        """应用过滤条件（旧版本，兼容性保留）"""
-        return self._apply_all_filters(messages, start_timestamp, filter_user_ids, keywords)
+            page_min_time, page_max_time = self._get_page_time_range(server_messages)
 
-    def _extract_text_content(self, msg: Dict) -> str:
-        """
-        从QQ消息中提取纯文本内容。
-        QQ API返回的消息结构中，内容存储在 'message' 字段（消息链列表）中，
-        需要遍历消息链提取文本类型的内容。
-        
-        Args:
-            msg: QQ消息字典
-            
-        Returns:
-            str: 提取出的纯文本内容
-        """
-        message_chain = msg.get('message', [])
-        if not isinstance(message_chain, list):
-            # 如果不是列表，尝试直接转换
-            return str(message_chain)
-        
-        text_parts = []
-        for component in message_chain:
-            if not isinstance(component, dict):
-                continue
-            comp_type = component.get('type')
-            if comp_type == 'text':
-                text_content = component.get('data', {}).get('text', '')
-                if text_content:
-                    text_parts.append(text_content)
-            # 可以根据需要添加其他类型的处理，如图片用 [图片] 替代
-        
-        return ''.join(text_parts)
+            insert_result = self.repo.insert_messages(group_id, server_messages)
+            inserted_count += insert_result.inserted_count
 
-    def _get_user_info(self, msg: Dict) -> tuple:
-        """
-        从QQ消息中提取用户信息。
-        根据 OneBot V11 官方文档，get_group_msg_history 返回的 sender 对象包含：
-        - user_id: 发送者 QQ 号
-        - nickname: 发送者昵称
-        
-        注意：群名片(card)只在 get_group_member_info API 中才有，此处不存在。
-        
-        Args:
-            msg: QQ消息字典
-            
-        Returns:
-            tuple: (user_id: str, nickname: str)
-        """
-        sender = msg.get('sender', {})
-        user_id = str(sender.get('user_id', ''))
-        nickname = sender.get('nickname', '')
-        
-        return user_id, nickname
+            self.repo.upsert_sync_state(
+                group_id=group_id,
+                oldest_seq=insert_result.page_oldest_anchor,
+                covered_from=page_min_time,
+                covered_to=page_max_time,
+            )
 
-    def _get_all_searchable_text(self, msg: Dict) -> str:
-        """
-        获取消息中所有可用于关键词搜索的文本内容。
-        包括：消息文本、发送者昵称、发送者QQ号
-        
-        Args:
-            msg: QQ消息字典
-            
-        Returns:
-            str: 所有可搜索的文本内容拼接在一起
-        """
-        text_parts = []
-        
-        # 1. 消息文本内容
-        content = self._extract_text_content(msg)
-        if content:
-            text_parts.append(content)
-        
-        # 2. 发送者信息（昵称、QQ号）
-        user_id, nickname = self._get_user_info(msg)
-        if nickname:
-            text_parts.append(nickname)
-        if user_id:
-            text_parts.append(user_id)
-        
-        return ' '.join(text_parts)
+            refreshed_state = self.repo.get_sync_state(group_id)
+            if refreshed_state.covered_from is not None and refreshed_state.covered_from <= target_start:
+                stop_reason = "target_reached"
+                break
 
-    def _apply_all_filters(
-        self,
-        messages: List[Dict],
-        start_timestamp: Optional[int],
-        filter_user_ids: Optional[List[int]],
-        keywords: Optional[List[str]]
-    ) -> List[Dict]:
-        """应用所有过滤条件：时间、用户ID、关键词"""
-        logger.info(f"AngelEye: 应用过滤条件 - 开始时间: {start_timestamp}, 用户IDs: {filter_user_ids}, 关键词: {keywords}")
+            if insert_result.inserted_count == 0 and refreshed_state.covered_from == last_oldest_time:
+                no_progress_pages += 1
+            else:
+                no_progress_pages = 0
+                last_oldest_time = refreshed_state.covered_from
 
-        filtered_messages = []
+            if no_progress_pages >= self.config.history_exhausted_no_progress_pages:
+                self.repo.upsert_sync_state(group_id=group_id, history_exhausted=True)
+                stop_reason = "history_exhausted"
+                break
+
+            next_cursor = self.repo.extract_anchor(server_messages[0])
+            if next_cursor is None or next_cursor == cursor_id:
+                stop_reason = "cursor_stuck"
+                break
+            cursor_id = next_cursor
+            await asyncio.sleep(self.config.server_call_delay)
+
+        logger.info(
+            "AngelEye[sync]: group_id=%s direction=tail pages=%s inserted=%s stop=%s target_start=%s",
+            group_id,
+            pages_fetched,
+            inserted_count,
+            stop_reason,
+            target_start,
+        )
+        return SyncResult(
+            direction="tail",
+            pages_fetched=pages_fetched,
+            inserted_count=inserted_count,
+            stop_reason=stop_reason,
+        )
+
+    async def _fetch_page(self, bot: "Bot", group_id: str, cursor_id: int) -> List[Dict]:
+        payload = {
+            "group_id": int(group_id),
+            "message_seq": int(cursor_id),
+            "reverseOrder": True,
+        }
+        result = await bot.api.call_action("get_group_msg_history", **payload)
+        if not result or "messages" not in result:
+            raise ValueError(f"API返回无效结果: {result}")
+        messages = result.get("messages", [])
+        if not isinstance(messages, list):
+            raise ValueError(f"API返回 messages 非列表: {type(messages)}")
+        return messages
+
+    def _determine_coverage_status(self, query_start: int, query_end: int, state: SyncState) -> str:
+        if state.covered_from is None or state.covered_to is None:
+            return "PARTIAL"
+        if query_start >= state.covered_from and query_end <= state.covered_to:
+            return "FULL"
+        return "PARTIAL"
+
+    def _format_messages(self, messages: List[Dict]) -> List[str]:
+        formatted: List[str] = []
         for msg in messages:
-            # 时间过滤
-            if start_timestamp is not None:
-                msg_time = msg.get('time', 0)
-                if msg_time < start_timestamp:
-                    continue  # 消息太旧，跳过
+            try:
+                formatted.append(format_unified_message(msg, self.self_id))
+            except Exception as exc:
+                logger.warning("AngelEye: 格式化单条消息失败: %s", exc)
+        return formatted
 
-            # 用户ID过滤 - 从 sender 中获取正确的 user_id
-            if filter_user_ids:
-                user_id, _ = self._get_user_info(msg)
-                # 转换为int进行比较（filter_user_ids是List[int]）
-                try:
-                    user_id_int = int(user_id) if user_id else None
-                except (ValueError, TypeError):
-                    user_id_int = None
-                
-                if user_id_int is None or user_id_int not in filter_user_ids:
-                    continue
+    def close(self) -> None:
+        self.repo.close()
 
-            # 关键词过滤 - 搜索消息文本、昵称、QQ号
-            if keywords:
-                searchable_text = self._get_all_searchable_text(msg)
-                if not searchable_text:
-                    logger.debug(f"AngelEye: 无法提取消息可搜索内容，跳过。message_id: {msg.get('message_id')}")
-                    continue
-                if not any(keyword in searchable_text for keyword in keywords):
-                    continue
-
-            filtered_messages.append(msg)
-
-        logger.info(f"AngelEye: 过滤后剩余 {len(filtered_messages)} 条消息")
-        return filtered_messages
+    @staticmethod
+    def _get_page_time_range(messages: List[Dict]) -> tuple[int, int]:
+        times = [int(m.get("time", 0) or 0) for m in messages]
+        times = [t for t in times if t > 0]
+        if not times:
+            now_ts = int(time.time())
+            return now_ts, now_ts
+        return min(times), max(times)
