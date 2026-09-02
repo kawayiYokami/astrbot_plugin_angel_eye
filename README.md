@@ -12,6 +12,18 @@
 - **灵活筛选**: 支持按关键词、时间范围（过去N小时）和消息数量进行筛选。
 - **群聊专用**: 专为群聊场景设计，在私聊中会优雅地提示无法使用。
 
+## 🌟 天使五件套
+
+同一只粉毛天使的五个能力化身，合在一起就是一个完整的灵魂：
+
+| 插件 | 能力 |
+|------|------|
+| [天使之心](https://github.com/kawayiYokami/astrbot_plugin_angel_heart) | 智能群聊/私聊交互，懂分寸、知进退 |
+| [天使之眼](https://github.com/kawayiYokami/astrbot_plugin_angel_eye) | 聊天记录查询，随时翻旧账 |
+| [天使之笑](https://github.com/kawayiYokami/astrbot_plugin_angel_smile) | 表情包管理，看见好看的就想收进库存 |
+| [天使之魂](https://github.com/kawayiYokami/astrbot_plugin_angel_memory) | AI 记忆与认知，越用越懂你 |
+| [天使的画笔](https://github.com/kawayiYokami/astrbot_plugin_angel_brush) | 说话出图、发图改图 |
+
 ## 📦 安装
 
 1.  将本插件文件夹克隆或移动到您的 AstrBot 插件目录中。

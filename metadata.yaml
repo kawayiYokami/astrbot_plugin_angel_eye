@@ -2,5 +2,5 @@ name: astrbot_plugin_angel_eye
 display_name: 天使之眼
 description: "如果作为一个训练有素的 AI 天使，偷看 QQ 聊天记录也是很合情合理的。"
 author: kawayiYokami
-version: 1.0.6
+version: 1.0.7
 repo: https://github.com/kawayiYokami/astrbot_plugin_angel_eye
