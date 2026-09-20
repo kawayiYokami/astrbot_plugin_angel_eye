@@ -96,7 +96,7 @@ def format_unified_message(message_dict: Dict[str, Any], self_id: str = None) ->
         if "sender" in message_dict:
             sender = message_dict.get("sender", {})
             sender_id = sender.get("user_id", "未知ID")
-            nickname = sender.get("nickname", "未知用户")
+            nickname = sender.get("card") or sender.get("nickname") or "未知用户"
             # 判断是否为机器人自己发送的消息
             is_self = str(sender_id) == str(self_id) if self_id else False
             role_display = "[助理]" if is_self else "[群友]"
