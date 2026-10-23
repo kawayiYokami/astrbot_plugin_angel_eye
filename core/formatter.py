@@ -7,6 +7,7 @@ import re
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any
+from .rich_message import format_rich_segment
 
 # 定义北京时间时区
 BEIJING_TZ = timezone(timedelta(hours=8))
@@ -152,8 +153,8 @@ def format_unified_message(message_dict: Dict[str, Any], self_id: str = None) ->
                         text_content = re.sub(r'\s+', ' ', text_content).strip()
                         if text_content:
                             content_parts.append(text_content)
-                    elif comp_type == "image":
-                        content_parts.append("[图片]")
+                    elif comp_type in {"json", "xml", "markdown", "image", "file", "record", "video", "forward", "node", "share", "contact", "location", "music"}:
+                        content_parts.append("\n" + format_rich_segment(component) + "\n")
                     elif comp_type == "face":
                         face_id = data.get("id", "?")
                         content_parts.append(f"[表情:{face_id}]")
@@ -172,7 +173,7 @@ def format_unified_message(message_dict: Dict[str, Any], self_id: str = None) ->
                     elif comp_type == "forward":
                         content_parts.append("[转发消息]")
                     else:
-                        content_parts.append(f"[{comp_type or '未知类型'}]")
+                        content_parts.append("\n" + format_rich_segment(component) + "\n")
             content_str = "".join(content_parts)
         
         # 4. 拼接最终字符串 (仅适用于QQ API消息)
@@ -181,7 +182,9 @@ def format_unified_message(message_dict: Dict[str, Any], self_id: str = None) ->
         # <昵称>
         # 内容
         # </昵称>
-        formatted_text = f"{time_str}[{role_display.replace('[', '').replace(']', '')}({sender_id})]\n<{nickname}>\n{content_str}\n</{nickname}>"
+        message_id = message_dict.get("message_id")
+        id_label = f" [消息ID:{message_id}]" if re.fullmatch(r"-?\d{1,30}", str(message_id)) else ""
+        formatted_text = f"{time_str}[{role_display.replace('[', '').replace(']', '')}({sender_id})]{id_label}\n<{nickname}>\n{content_str}\n</{nickname}>"
         return formatted_text
     except Exception as e:
         # 发生任何错误时，返回一个错误标识，避免整个流程中断

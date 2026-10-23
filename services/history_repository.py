@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from astrbot.core.star.star_tools import StarTools
+from ..core.rich_message import extract_rich_segments
 
 
 @dataclass
@@ -379,6 +380,7 @@ class HistoryRepository:
 
         message_chain = msg.get("message", [])
         if isinstance(message_chain, list):
+            # Keep ordinary message text complete; cap each rich attachment.
             for component in message_chain:
                 if not isinstance(component, dict):
                     continue
@@ -386,6 +388,8 @@ class HistoryRepository:
                     text_value = component.get("data", {}).get("text", "")
                     if text_value:
                         text_parts.append(str(text_value))
+                elif component.get("type") not in ("reply", "at", "face"):
+                    text_parts.append(extract_rich_segments([component]))
 
         sender = msg.get("sender", {}) or {}
         nickname = sender.get("nickname")

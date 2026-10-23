@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 from ..core.exceptions import ResourceBusyError
 from ..core.formatter import format_unified_message
 from .history_repository import HistoryRepository, SyncState
+from .rich_content_service import RichContentResolver
 
 # 导入 logger
 try:
@@ -66,6 +67,7 @@ class QQChatHistoryService:
         self.self_id: Optional[str] = None
         self.config = FetchConfig()
         self.repo = HistoryRepository()
+        self.rich_content_resolver = RichContentResolver()
         self._group_locks: Dict[str, asyncio.Lock] = {}
         # 仅接受当前协议端回包确认过的游标，不复用 NapCat 持久化序号。
         self._snowluma_history_cursors: Dict[tuple[int, str], int] = {}
@@ -140,6 +142,9 @@ class QQChatHistoryService:
         finally:
             group_lock.release()
 
+        local_messages = await self.rich_content_resolver.enrich_messages(
+            bot, local_messages, scope=group_id,
+        )
         formatted_messages = self._format_messages(local_messages)
         returned_count = len(formatted_messages)
         remaining_in_range = max(total_in_range - returned_count, 0)
