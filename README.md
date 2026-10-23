@@ -60,6 +60,18 @@
 
 本插件目前无需任何额外配置。
 
+### QQ 历史接口兼容
+
+查询历史时通过 `get_version_info` 识别 SnowLuma，使用其返回的 `message_id` 翻页；其他协议端继续使用 `message_seq`。切换协议端或连接后，先从最新页取得当前接口的游标，避免复用旧缓存中的 NapCat 序号。游标按连接和群隔离，重复游标会终止本次同步。
+
+本地缓存按消息时间维护最早游标，不将不透明的消息 ID 大小当作时间顺序。已有缓存可以保留。
+
+游标回归测试只使用构造数据和内存 SQLite，无需连接 QQ 或安装 AstrBot：
+
+```bash
+python -m unittest discover -s tests -p 'test_history_compat.py'
+```
+
 ## 🧩 架构
 
 插件采用了 AstrBot 官方推荐的 `FunctionTool` 类进行开发，结构清晰，易于维护。

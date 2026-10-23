@@ -127,7 +127,10 @@ class HistoryRepository:
                 oldest_seq = CASE
                     WHEN excluded.oldest_seq IS NULL THEN sync_state.oldest_seq
                     WHEN sync_state.oldest_seq IS NULL THEN excluded.oldest_seq
-                    WHEN excluded.oldest_seq < sync_state.oldest_seq THEN excluded.oldest_seq
+                    WHEN excluded.covered_from IS NOT NULL
+                         AND (sync_state.covered_from IS NULL
+                              OR excluded.covered_from <= sync_state.covered_from)
+                        THEN excluded.oldest_seq
                     ELSE sync_state.oldest_seq
                 END,
                 covered_from = CASE
@@ -175,6 +178,7 @@ class HistoryRepository:
         if min_time is not None or max_time is not None:
             self.upsert_sync_state(
                 group_id=group_id,
+                oldest_seq=self.rebuild_oldest_seq_from_messages(group_id),
                 covered_from=min_time,
                 covered_to=max_time,
             )
@@ -353,7 +357,7 @@ class HistoryRepository:
 
     @staticmethod
     def extract_anchor(msg: Dict[str, Any]) -> Optional[int]:
-        seq = msg.get("message_seq")
+        seq = msg.get("message_id") if msg.get("_history_backend") == "snowluma" else msg.get("message_seq")
         if seq is None:
             seq = msg.get("message_id")
         try:
