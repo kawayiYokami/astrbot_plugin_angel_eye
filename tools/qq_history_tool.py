@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
@@ -20,7 +19,7 @@ from ..services.qq_history_service import HistoryQueryResult, QQChatHistoryServi
 try:
     from astrbot.api import logger
 except ImportError:
-    logger = logging.getLogger(__name__)
+    from astrbot.api import logger
 
 BEIJING_TZ = timezone(timedelta(hours=8))
 

@@ -6,7 +6,6 @@ Angel Eye 插件 - QQ 群聊历史服务
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -20,7 +19,7 @@ from .history_repository import HistoryRepository, SyncState
 try:
     from astrbot.api import logger
 except ImportError:
-    logger = logging.getLogger(__name__)
+    from astrbot.api import logger
 
 if TYPE_CHECKING:
     from astrbot.api import Bot
