@@ -34,6 +34,8 @@ class QQHistorySearchTool(FunctionTool):
     description: str = (
         "搜索当前群聊聊天记录。时间参数 start/end 至少精确到天（YYYY-MM-DD），"
         "可选精确到时分秒（YYYY-MM-DD HH:mm 或 YYYY-MM-DD HH:mm:ss）。"
+        "返回真实消息ID、卡片自带文字和链接、文件及媒体资源信息；合并转发按需展开。"
+        "卡片摘要不等于站外完整正文，媒体链接不表示已完成图片识别或语音转写。"
     )
     parameters: dict = field(
         default_factory=lambda: {

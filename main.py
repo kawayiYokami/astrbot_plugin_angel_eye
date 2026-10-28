@@ -3,7 +3,12 @@
 重构后，本插件仅提供一个函数工具：QQHistorySearchTool。
 """
 
+import sys
+
+from astrbot.api.event import filter
 from astrbot.api.star import Star, Context, register
+from .core.event_enrichment import enrich_event, enrich_request
+from .services.rich_content_service import RichContentResolver
 from .tools.qq_history_tool import QQHistorySearchTool
 
 # 导入 logger
@@ -23,6 +28,7 @@ class AngelEyePlugin(Star):
 
     def __init__(self, context: Context, config: dict = None):
         super().__init__(context)
+        self.rich_content_resolver = RichContentResolver()
 
         # 先清理可能存在的同名工具，避免重复声明
         try:
@@ -35,6 +41,15 @@ class AngelEyePlugin(Star):
         self.qq_history_tool = QQHistorySearchTool()
         self.context.add_llm_tools(self.qq_history_tool)
         logger.info("AngelEyePlugin: QQHistorySearchTool 已注册。")
+
+    @filter.event_message_type(filter.EventMessageType.ALL, priority=sys.maxsize + 1)
+    async def normalize_rich_messages(self, event):
+        """Preserve readable content before native history; keep wake policy intact."""
+        await enrich_event(event, self.rich_content_resolver)
+
+    @filter.on_llm_request(priority=-10000)
+    async def include_rich_request_content(self, event, request):
+        await enrich_request(event, request, self.rich_content_resolver)
 
     async def terminate(self):
         '''可选择实现 terminate 函数，当插件被卸载/停用时会调用。'''
