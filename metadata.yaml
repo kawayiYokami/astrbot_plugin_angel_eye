@@ -1,6 +1,16 @@
 name: astrbot_plugin_angel_eye
 display_name: 天使之眼
-description: "如果作为一个训练有素的 AI 天使，偷看 QQ 聊天记录也是很合情合理的。"
+desc: "群聊聊天记录查询工具：让LLM按关键词和时间翻旧账、回看QQ群聊记录，群聊专用函数调用。"
+short_desc: "让AI随时翻群聊旧账"
+version: 1.0.8
 author: kawayiYokami
-version: 1.0.7
 repo: https://github.com/kawayiYokami/astrbot_plugin_angel_eye
+social_link: https://github.com/kawayiYokami
+category: 工具
+tags:
+  - 聊天记录
+  - 群聊
+  - 查询
+  - 搜索
+  - QQ
+  - LLM工具
