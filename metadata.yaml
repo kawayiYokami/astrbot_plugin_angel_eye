@@ -2,7 +2,7 @@ name: astrbot_plugin_angel_eye
 display_name: 天使之眼
 desc: "群聊聊天记录查询工具：让LLM按关键词和时间翻旧账、回看QQ群聊记录，群聊专用函数调用。"
 short_desc: "让AI随时翻群聊旧账"
-version: 1.0.9
+version: 1.0.10
 author: kawayiYokami
 repo: https://github.com/kawayiYokami/astrbot_plugin_angel_eye
 social_link: https://github.com/kawayiYokami
