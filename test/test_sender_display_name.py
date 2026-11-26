@@ -35,23 +35,23 @@ class TestFormatterSenderName:
     def test_card_preferred_over_nickname(self):
         msg = _make_message("m1", {"user_id": "u1", "nickname": "QQ昵称", "card": "群名片"})
         out = format_unified_message(msg, self_id="bot")
-        assert "<群名片>" in out
+        assert "群名片" in out
         assert "QQ昵称" not in out
 
     def test_fallback_to_nickname_when_card_empty(self):
         msg = _make_message("m1", {"user_id": "u1", "nickname": "QQ昵称", "card": ""})
         out = format_unified_message(msg, self_id="bot")
-        assert "<QQ昵称>" in out
+        assert "QQ昵称" in out
 
     def test_fallback_to_nickname_when_card_missing(self):
         msg = _make_message("m1", {"user_id": "u1", "nickname": "QQ昵称"})
         out = format_unified_message(msg, self_id="bot")
-        assert "<QQ昵称>" in out
+        assert "QQ昵称" in out
 
     def test_unknown_when_both_blank(self):
         msg = _make_message("m1", {"user_id": "u1", "nickname": "", "card": ""})
         out = format_unified_message(msg, self_id="bot")
-        assert "<未知用户>" in out
+        assert "未知用户" in out
 
 
 class TestInsertStoresCard:

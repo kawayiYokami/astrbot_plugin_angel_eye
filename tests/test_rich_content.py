@@ -144,11 +144,11 @@ class RenderingTests(unittest.TestCase):
         self.assertIn("可读文字", text)
         self.assertNotIn("PRIVATE_CONFIG_SECRET", text)
 
-    def test_formatter_shows_card_and_original_signed_message_id(self):
+    def test_formatter_shows_card_without_message_id(self):
         msg = {"sender": {"user_id": 42, "nickname": "测试"}, "message_id": -77, "message": [segment("json", data=json.dumps(card()))]}
         text = format_unified_message(msg)
         self.assertIn("测试卡片标题", text)
-        self.assertIn("消息ID:-77", text)
+        self.assertNotIn("消息ID:-77", text)
         self.assertNotIn("[json]", text)
 
     def test_search_index_includes_card_and_complete_plain_text(self):

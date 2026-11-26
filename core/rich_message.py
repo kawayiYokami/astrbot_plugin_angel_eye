@@ -305,7 +305,9 @@ def format_rich_segment(segment, depth=0):
     if kind == "face":
         return "[表情:" + _text(data.get("id", "?"), 32) + "]"
     if kind == "reply":
-        return format_reply_segment(data)
+        # 历史回执是只读的：模型无法引用其中任何一条，引用目标留着只会指向一个
+        # 在结果集里对不上的 ID。实时注入走 format_reply_segment，不受这里影响。
+        return ""
     if kind == "at":
         target = _text(data.get("qq", "?"), 64)
         return "[@全体成员]" if target == "all" else f"[@{target}]"

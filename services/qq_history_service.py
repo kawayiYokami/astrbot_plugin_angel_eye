@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from ..core.exceptions import ResourceBusyError
-from ..core.formatter import format_unified_message
+from ..core.formatter import format_message_blocks
 from .history_repository import HistoryRepository, SyncState
 from .rich_content_service import RichContentResolver
 
@@ -160,8 +160,7 @@ class QQChatHistoryService:
         local_messages = await self.rich_content_resolver.enrich_messages(
             bot, local_messages, scope=group_id, budget=rich_budget,
         )
-        formatted_messages = self._format_messages(local_messages)
-        returned_count = len(formatted_messages)
+        formatted_messages, returned_count = self._format_messages(local_messages)
         remaining_in_range = max(total_in_range - returned_count, 0)
         coverage_status = self._determine_coverage_status(query_start, query_end, final_state)
 
@@ -173,7 +172,7 @@ class QQChatHistoryService:
             final_state.covered_from,
             final_state.covered_to,
             coverage_status,
-            len(formatted_messages),
+            returned_count,
         )
 
         return HistoryQueryResult(
@@ -527,14 +526,12 @@ class QQChatHistoryService:
             return "FULL"
         return "PARTIAL"
 
-    def _format_messages(self, messages: List[Dict]) -> List[str]:
-        formatted: List[str] = []
-        for msg in messages:
-            try:
-                formatted.append(format_unified_message(msg, self.self_id))
-            except Exception as exc:
-                logger.warning("AngelEye: 格式化单条消息失败: %s", exc)
-        return formatted
+    def _format_messages(self, messages: List[Dict]) -> tuple[List[str], int]:
+        try:
+            return format_message_blocks(messages, self.self_id)
+        except Exception as exc:
+            logger.warning("AngelEye: 格式化消息失败: %s", exc)
+            return [], 0
 
     def close(self) -> None:
         self.repo.close()
