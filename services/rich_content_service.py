@@ -6,10 +6,37 @@ import copy
 import json
 import time
 
+from ..core.rich_message import format_rich_segment
+
 
 class RichContentResolver:
     def __init__(self):
         self._cache = {}
+
+    async def expand_forward(self, bot, reference, *, scope="", budget=None):
+        """读一个转发资源并渲染成文本块；没展开成返回 None。
+
+        与 enrich_chain 共用同一套抓取、缓存和读取预算，区别只在产出：
+        这里给的是可以直接写进正文的文本，而不是消息链。嵌套转发按
+        enrich_chain 的深度规则展开，所以预算与轮转行为都不变。
+        """
+        if (
+            not isinstance(reference, (str, int))
+            or not str(reference)
+            or len(str(reference)) > 256
+        ):
+            return None
+        if budget is None:
+            budget = [1]
+        segment = {"type": "forward", "data": {"id": str(reference)}}
+        enriched = await self.enrich_chain(bot, [segment], scope=scope, budget=budget)
+        if not enriched or not isinstance(enriched[0], dict):
+            return None
+        data = enriched[0].get("data")
+        if not isinstance(data, dict) or not isinstance(data.get("content"), list) or not data["content"]:
+            # 读取上限 / 超时 / 失败：保持正文里的占位不动，下次查询再试
+            return None
+        return format_rich_segment(enriched[0])
 
     async def enrich_messages(self, bot, messages, *, scope, budget=None):
         if budget is None:

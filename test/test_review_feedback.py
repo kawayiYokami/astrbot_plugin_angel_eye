@@ -93,8 +93,13 @@ def test_credential_values_are_absent_from_new_keyword_index(tmp_path, credentia
     try:
         repo.insert_messages("100", [message])
         assert repo.query_messages("100", 90, 110, ["SYNTHETIC_SECRET"], None, 10) == []
-        assert len(repo.query_messages("100", 90, 110, ["id=7"], None, 10)) == 1
-        assert repo.query_messages("100", 90, 110, None, None, 10) == [original]
+        hits = repo.query_messages("100", 90, 110, ["id=7"], None, 10)
+        assert len(hits) == 1
+        assert hits[0]["message_id"] == "101"
+        assert "synthetic card" in hits[0]["body"]
+        assert "SYNTHETIC_SECRET" not in hits[0]["body"]
+        assert len(repo.query_messages("100", 90, 110, None, None, 10)) == 1
+        assert message == original
     finally:
         repo.close()
 

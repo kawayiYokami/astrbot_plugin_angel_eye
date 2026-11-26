@@ -26,9 +26,8 @@ from _angel_eye_under_test.core.event_enrichment import (
     QUOTE_BODY_PREFIX, VOICE_TRANSCRIPT_PREFIX,
     component_segment, enrich_event, enrich_request,
 )
-from _angel_eye_under_test.core.formatter import format_unified_message
+from _angel_eye_under_test.core.formatter import _content_to_text, format_unified_message
 from _angel_eye_under_test.core.rich_message import extract_json_card, extract_rich_segments, extract_xml_card, format_rich_segment, public_url
-from _angel_eye_under_test.services.history_repository import HistoryRepository
 from _angel_eye_under_test.services.rich_content_service import RichContentResolver
 
 
@@ -151,13 +150,13 @@ class RenderingTests(unittest.TestCase):
         self.assertNotIn("消息ID:-77", text)
         self.assertNotIn("[json]", text)
 
-    def test_search_index_includes_card_and_complete_plain_text(self):
+    def test_stored_body_includes_card_and_complete_plain_text(self):
         text = "正文" * 8000
         msg = {"message": [segment("text", text=text), segment("json", data=card())]}
-        search = HistoryRepository._build_search_text(msg)
-        self.assertIn(text, search)
-        self.assertIn("测试卡片标题", search)
-        self.assertNotIn("PRIVATE_CONFIG_SECRET", search)
+        body = _content_to_text(msg)
+        self.assertIn(text, body)
+        self.assertIn("测试卡片标题", body)
+        self.assertNotIn("PRIVATE_CONFIG_SECRET", body)
 
 
 class AsyncTests(unittest.IsolatedAsyncioTestCase):

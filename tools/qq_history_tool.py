@@ -34,6 +34,10 @@ class QQHistorySearchTool(FunctionTool):
     description: str = (
         "搜索当前群聊的聊天记录，可以帮你回忆起当前会话曾经发生过的对话。"
         "支持按关键词、时间范围、发送者过滤和结果切片。"
+        "必须给出最小必要的时间区间，贴住你真正需要的范围，禁止脱离目标做宽范围搜索。"
+        "单次查询跨度尽可能不超过一周；需要更早的内容，就按一周一段分开查，"
+        "看完上一段的结果再决定要不要往前推。"
+        "除非确实必要，不要查一年以前的信息。"
     )
     parameters: dict = field(
         default_factory=lambda: {
@@ -46,7 +50,7 @@ class QQHistorySearchTool(FunctionTool):
                 "start": {
                     "type": "string",
                     "format": "date-time",
-                    "description": "起始时间（含），ISO 8601，例 2026-11-23T00:00:00+08:00。不传表示不限起点。",
+                    "description": "起始时间（含），ISO 8601，例 2026-11-23T00:00:00+08:00。必须给出，且要贴住你真正需要的范围；不给按最近 24 小时处理。",
                 },
                 "end": {
                     "type": "string",
