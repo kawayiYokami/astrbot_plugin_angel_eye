@@ -6,6 +6,7 @@ Angel Eye 插件 - QQ 群聊历史服务
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -15,6 +16,9 @@ from ..core.exceptions import ResourceBusyError
 from ..core.formatter import format_message_blocks
 from .history_repository import HistoryRepository, SyncState
 from .rich_content_service import RichContentResolver
+
+# 正文里未展开转发的资源 ID：`[合并转发：尚未展开，资源ID=xxx]`
+_FORWARD_REF_PATTERN = re.compile(r"资源ID=([^，\]\s]+)")
 
 # 导入 logger
 try:
@@ -71,6 +75,8 @@ class QQChatHistoryService:
         # 仅接受当前协议端回包确认过的游标，不复用 NapCat 持久化序号。
         self._snowluma_history_cursors: Dict[tuple[int, str], int] = {}
         self._napcat_history_cursors: Dict[tuple[int, str], int] = {}
+        # 协议端类型每个 bot 生命周期内固定，识别一次即可，不必每页重探。
+        self._backend_is_snowluma: Dict[int, bool] = {}
         # Stable message IDs keep failed resources from monopolizing each query.
         # Retain at most 64 IDs per scope and 128 recently used connection/groups.
         self._forward_index_rotation: Dict[tuple[int, str], List[str]] = {}
@@ -113,29 +119,34 @@ class QQChatHistoryService:
 
         await group_lock.acquire()
         try:
-            initial_state = self.repo.get_sync_state(group_id)
-            head_result = await self._head_fill(bot, group_id, initial_state, query_start)
-            stop_reasons.append(f"head:{head_result.stop_reason}")
+            state = self.repo.get_sync_state(group_id)
+            # 先查后补：请求区间已被覆盖的一侧不发任何协议端请求。
+            needs_head = state.covered_to is None or query_end > state.covered_to
 
-            state_after_head = self.repo.update_coverage_from_messages(group_id)
-            needs_tail = state_after_head.covered_from is None or query_start < state_after_head.covered_from
+            if needs_head:
+                head_result = await self._head_fill(bot, group_id, state, query_start, query_end)
+                stop_reasons.append(f"head:{head_result.stop_reason}")
+                # head 可能把最老那头也一并确认了（history_end），重新取状态再判 tail。
+                state = self.repo.get_sync_state(group_id)
+
+            needs_tail = state.covered_from is None or query_start < state.covered_from
 
             if needs_tail:
-                tail_result = await self._tail_fill(bot, group_id, query_start, state_after_head)
+                tail_result = await self._tail_fill(bot, group_id, query_start, state)
                 stop_reasons.append(f"tail:{tail_result.stop_reason}")
 
-            final_state = self.repo.update_coverage_from_messages(group_id)
+            final_state = self.repo.get_sync_state(group_id)
 
-            if keywords:
-                pending = self.repo.pending_forward_messages(
-                    group_id, query_start, query_end, filter_user_ids, limit=64,
+            # 转发展开对所有查询生效：正文入库后，渲染层已经没有消息链可以就地展开，
+            # 占位符不在这里消掉，普通查询就只能看到一行「尚未展开」。
+            pending = self.repo.pending_forward_rows(
+                group_id, query_start, query_end, filter_user_ids, limit=64,
+            )
+            if pending:
+                await self._index_pending_forwards(
+                    bot, group_id, pending, rich_budget,
                 )
-                if pending:
-                    enriched = await self._index_pending_forwards(
-                        bot, group_id, pending, rich_budget,
-                    )
-                    self.repo.update_enriched_messages(group_id, enriched)
-                    stop_reasons.append("forward:index_bounded")
+                stop_reasons.append("forward:index_bounded")
 
             local_messages = self.repo.query_messages(
                 group_id=group_id,
@@ -190,26 +201,50 @@ class QQChatHistoryService:
         )
 
     async def _index_pending_forwards(self, bot, group_id, pending, budget):
+        """把范围内未展开的转发换成正文文本，写回库里。
+
+        pending 是 [(message_id, body)]。轮转与读取预算的语义保持原样：
+        每轮最多碰 3 条候选，预算耗尽就停，未碰到的排到队尾等下次。
+        """
         key = (id(bot), str(group_id))
-        candidates = {str(message["message_id"]): message for message in pending}
+        candidates = {str(message_id): body for message_id, body in pending}
         previous = self._forward_index_rotation.pop(key, [])
         queue = [message_id for message_id in previous if message_id in candidates]
         queue.extend(message_id for message_id in candidates if message_id not in queue)
 
-        enriched = []
         attempted = 0
         for message_id in queue[:3]:
             if budget[0] <= 0:
                 break
-            enriched.extend(await self.rich_content_resolver.enrich_messages(
-                bot, [candidates[message_id]], scope=group_id, budget=budget,
-            ))
+            body = candidates[message_id]
+            expanded = await self._expand_forwards_in_body(bot, group_id, body, budget)
+            if expanded != body:
+                self.repo.update_body(group_id, message_id, expanded)
             attempted += 1
 
         self._forward_index_rotation[key] = queue[attempted:] + queue[:attempted]
         while len(self._forward_index_rotation) > 128:
             self._forward_index_rotation.pop(next(iter(self._forward_index_rotation)))
-        return enriched
+
+    async def _expand_forwards_in_body(self, bot, group_id, body, budget):
+        """把正文里的未展开转发占位逐个换成转发明细文本。"""
+        for reference in _FORWARD_REF_PATTERN.findall(body or ""):
+            if budget[0] <= 0:
+                break
+            block = await self.rich_content_resolver.expand_forward(
+                bot, reference, scope=group_id, budget=budget,
+            )
+            if not block:
+                continue
+            # 占位括号里可能带失败原因，按正则匹配整块；只换这一处，
+            # 新插入的转发正文不会被后续 replace 再扫一遍。
+            body = re.sub(
+                r"\[合并转发：尚未展开[^，\]\n]*，资源ID=" + re.escape(reference) + r"\]",
+                lambda _match: block,
+                body,
+                count=1,
+            )
+        return body
 
     async def _initialize_self_id(self, bot: "Bot") -> str:
         try:
@@ -301,12 +336,45 @@ class QQChatHistoryService:
         length = end_idx - start_idx + 1
         return min(length, self.config.max_limit), start_idx - 1, False
 
+    def _settle_coverage(
+        self,
+        group_id: str,
+        direction: str,
+        stop_reason: str,
+        request_start: int | None,
+        request_end: int | None,
+    ) -> None:
+        """把一次同步的确认结果并进覆盖区间。
+
+        只认「确定到底」的停止原因：
+        - empty：协议端真的返回了空数组 → 请求边界算进覆盖；tail 侧还意味着历史见底
+        - target_reached：已经翻到请求起点 → 请求边界算进覆盖
+        - caught_up：翻回已存数据，更外侧确实没有新消息 → 请求边界算进覆盖
+        - history_end：协议端答「没有了」——head 侧是空库翻光，tail 侧是游标回绕，
+          两个方向同名不同义：head 两头都算进覆盖，tail 只算最老那头
+
+        failures / cursor_stuck / cursor_missing 一律不扩张：那两个是游标异常，
+        不是尽头证据，只认循环里已经写进去的实际页边界。
+        """
+        if direction == "tail" and stop_reason in {"empty", "history_end"}:
+            self.repo.expand_coverage(group_id, from_ts=request_start)
+            self.repo.upsert_sync_state(group_id=group_id, history_exhausted=True)
+        elif direction == "tail" and stop_reason == "target_reached":
+            self.repo.expand_coverage(group_id, from_ts=request_start)
+        elif direction == "head" and stop_reason == "history_end":
+            # 空库首次把历史翻光：最老那头也到底了，请求起点算进覆盖。
+            self.repo.expand_coverage(group_id, from_ts=request_start, to_ts=request_end)
+            self.repo.upsert_sync_state(group_id=group_id, history_exhausted=True)
+        elif direction == "head" and stop_reason in {"caught_up", "empty", "target_reached"}:
+            self.repo.expand_coverage(group_id, to_ts=request_end)
+
     async def _head_fill(
         self,
         bot: "Bot",
         group_id: str,
         state: SyncState,
         target_start: int,
+        request_end: int,
     ) -> SyncResult:
         cursor_id = 0
         pages_fetched = 0
@@ -355,7 +423,14 @@ class QQChatHistoryService:
                 break
 
             if insert_result.inserted_count == 0:
-                stop_reason = "caught_up"
+                # inserted==0 的含义取决于库里有没有旧数据：
+                # 空库没有「之前存过的数据」，这一页重复只可能来自协议端回绕，
+                # 那是确定的到底证据；非空库则可能只是撞上自己存过的，不能当证据用，
+                # 最老那头的到底证据只认 tail 的 empty。
+                if is_empty_cache and pages_fetched > 1:
+                    stop_reason = "history_end"
+                else:
+                    stop_reason = "caught_up"
                 break
 
             next_cursor = self.repo.extract_anchor(server_messages[0])
@@ -375,6 +450,7 @@ class QQChatHistoryService:
             inserted_count,
             stop_reason,
         )
+        self._settle_coverage(group_id, "head", stop_reason, target_start, request_end)
         return SyncResult(
             direction="head",
             pages_fetched=pages_fetched,
@@ -450,7 +526,10 @@ class QQChatHistoryService:
                 stop_reason = "cursor_stuck"
                 break
             if next_cursor in seen_cursors:
-                stop_reason = "cursor_cycle"
+                # 协议端把已经拉过的一页又原样给一遍 = 没有更老的数据了。
+                # tail 从已知最老边界往左翻，起点就在未知区域，循环不可能来自
+                # 撞上自己存的数据（那是 head 的处境），所以这就是尽头证据。
+                stop_reason = "history_end"
                 break
             seen_cursors.add(next_cursor)
             cursor_id = next_cursor
@@ -464,6 +543,7 @@ class QQChatHistoryService:
             stop_reason,
             target_start,
         )
+        self._settle_coverage(group_id, "tail", stop_reason, target_start, None)
         return SyncResult(
             direction="tail",
             pages_fetched=pages_fetched,
@@ -473,16 +553,19 @@ class QQChatHistoryService:
 
     async def _fetch_page(self, bot: "Bot", group_id: str, cursor_id: int) -> List[Dict]:
         cursor_key = (id(bot), str(group_id))
-        is_snowluma = cursor_key in self._snowluma_history_cursors
-        try:
-            version = await bot.api.call_action("get_version_info")
-            if isinstance(version, dict):
-                version = version.get("data", version)
-                if isinstance(version, dict) and version.get("app_name"):
-                    is_snowluma = "snowluma" in str(version["app_name"]).lower()
-        except Exception:
-            # 探测暂时失败时保留已识别的协议；首次失败仍沿用原 NapCat 行为。
-            pass
+        is_snowluma = self._backend_is_snowluma.get(id(bot))
+        if is_snowluma is None:
+            is_snowluma = cursor_key in self._snowluma_history_cursors
+            try:
+                version = await bot.api.call_action("get_version_info")
+                if isinstance(version, dict):
+                    version = version.get("data", version)
+                    if isinstance(version, dict) and version.get("app_name"):
+                        is_snowluma = "snowluma" in str(version["app_name"]).lower()
+                        self._backend_is_snowluma[id(bot)] = is_snowluma
+            except Exception:
+                # 探测暂时失败时保留已识别的协议；首次失败仍沿用原 NapCat 行为。
+                pass
 
         payload = {
             "group_id": int(group_id),

@@ -270,7 +270,13 @@ def format_rich_segment(segment, depth=0):
                 lines.append("[转发条目未提供可读内容]")
             return _join(lines)
         reference = _text(data.get("id", data.get("message_id", "")), 256)
-        status = {"timeout": "读取超时", "failed": "读取失败", "budget": "本次读取上限"}.get(data.get("_content_status"), "尚未展开")
+        # 未完成的转发一律以「尚未展开」起头：索引器按这个字样挑出待重试的行，
+        # 一旦渲染成「读取失败」就再也挑不到，等于一次失败永久放弃。原因放进
+        # 括号里，正文仍然看得出为什么没展开。
+        reason = {"timeout": "读取超时", "failed": "读取失败", "budget": "本次读取上限"}.get(
+            data.get("_content_status")
+        )
+        status = "尚未展开" if reason is None else f"尚未展开（{reason}）"
         return f"[合并转发：{status}" + (f"，资源ID={reference}" if reference else "") + "]"
     if kind in ("image", "record", "video", "file"):
         label = {"image": "图片", "record": "语音", "video": "视频", "file": "文件"}[kind]

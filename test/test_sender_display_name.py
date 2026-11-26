@@ -54,10 +54,10 @@ class TestFormatterSenderName:
         assert "未知用户" in out
 
 
-class TestInsertStoresCard:
-    """insert_messages 落库的 nickname 列。"""
+class TestSendersTableStoresCard:
+    """insert_messages 把显示名写进 senders 表（不再是 messages.nickname 列）。"""
 
-    def test_nickname_column_takes_card(self, tmp_path):
+    def test_senders_takes_card(self, tmp_path):
         repo = HistoryRepository(db_path=tmp_path / "qq_history_cache.db")
         try:
             repo.insert_messages(
@@ -65,13 +65,13 @@ class TestInsertStoresCard:
                 [_make_message("m1", {"user_id": "u1", "nickname": "QQ昵称", "card": "群名片"})],
             )
             row = repo._conn.execute(
-                "SELECT nickname FROM messages WHERE message_id = 'm1'"
+                "SELECT nickname FROM senders WHERE user_id = 'u1'"
             ).fetchone()
             assert row["nickname"] == "群名片"
         finally:
             repo.close()
 
-    def test_nickname_column_falls_back_to_nickname(self, tmp_path):
+    def test_senders_falls_back_to_nickname(self, tmp_path):
         repo = HistoryRepository(db_path=tmp_path / "qq_history_cache.db")
         try:
             repo.insert_messages(
@@ -79,30 +79,43 @@ class TestInsertStoresCard:
                 [_make_message("m1", {"user_id": "u1", "nickname": "QQ昵称", "card": ""})],
             )
             row = repo._conn.execute(
-                "SELECT nickname FROM messages WHERE message_id = 'm1'"
+                "SELECT nickname FROM senders WHERE user_id = 'u1'"
             ).fetchone()
             assert row["nickname"] == "QQ昵称"
         finally:
             repo.close()
 
 
-class TestSearchableByCard:
-    """search_text 与关键词检索必须能命中群名片。"""
+class TestSearchIgnoresSenderName:
+    """检索只走正文：发送者昵称不再进关键词索引。"""
 
-    def test_build_search_text_uses_card(self):
-        text = HistoryRepository._build_search_text(
-            _make_message("m1", {"user_id": "u9", "nickname": "QQ昵称", "card": "群名片"})
-        )
-        assert "群名片" in text
-        assert "QQ昵称" not in text
-        assert "u9" in text
-
-    def test_keyword_search_hits_card(self, tmp_path):
+    def test_nickname_is_not_searchable(self, tmp_path):
         repo = HistoryRepository(db_path=tmp_path / "qq_history_cache.db")
         try:
             repo.insert_messages(
                 GROUP_ID,
-                [_make_message("m1", {"user_id": "u1", "nickname": "QQ昵称", "card": "草神"})],
+                [_make_message("m1", {"user_id": "u1", "nickname": "QQ昵称", "card": "草神"},
+                               text="今天吃什么")],
+            )
+            rows = repo.query_messages(
+                group_id=GROUP_ID,
+                start_time=0,
+                end_time=END_TIME,
+                keywords=["草神"],
+                user_ids=None,
+                limit=10,
+            )
+            assert rows == []
+        finally:
+            repo.close()
+
+    def test_body_text_is_searchable(self, tmp_path):
+        repo = HistoryRepository(db_path=tmp_path / "qq_history_cache.db")
+        try:
+            repo.insert_messages(
+                GROUP_ID,
+                [_make_message("m1", {"user_id": "u1", "nickname": "QQ昵称", "card": "无关名片"},
+                               text="草神复刻了")],
             )
             rows = repo.query_messages(
                 group_id=GROUP_ID,
@@ -114,5 +127,6 @@ class TestSearchableByCard:
             )
             assert len(rows) == 1
             assert rows[0]["message_id"] == "m1"
+            assert "草神" in rows[0]["body"]
         finally:
             repo.close()

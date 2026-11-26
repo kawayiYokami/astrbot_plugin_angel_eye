@@ -147,40 +147,6 @@ class TailCursorRegressionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(bot.history_calls, history_params(
                     app, '123', [0, 0, anchor(app, 1)]))
 
-    async def test_backend_switches_rebuild_both_directions_in_full_queries(self):
-        for first_app, second_app in [('SnowLuma', 'NapCat'), ('NapCat', 'SnowLuma')]:
-            with self.subTest(first=first_app, second=second_app):
-                service = self.new_service(f'switch-{first_app}')
-                cached = [message(number, 1000 - number * 100)
-                          for number in range(1, 5)]
-                self.seed(service, '123', first_app, cached)
-                bot = HistoryBot(first_app, {
-                    0: [cached[0]], **{anchor(first_app, n): [cached[n]]
-                                      for n in range(1, 4)},
-                    anchor(first_app, 4): [message(5, 40)]})
-                await self.query(service, bot)
-                self.assertEqual(bot.history_calls, history_params(
-                    first_app, '123', [0, 0, *[anchor(first_app, n) for n in range(1, 5)]]))
-                bot.app = second_app
-                bot.history_calls.clear()
-                bot.set_pages({0: [cached[0]], **{
-                    anchor(second_app, n): [cached[n]] for n in range(1, 4)},
-                    anchor(second_app, 4): [message(5, 40)],
-                    anchor(second_app, 5): [message(6, 5)]})
-
-                result = await self.query(service, bot, start=10)
-
-                self.assertEqual(result.stop_reasons, ['head:caught_up', 'tail:target_reached'])
-                self.assertEqual(result.covered_from, 5)
-                self.assertEqual(bot.history_calls, history_params(
-                    second_app, '123', [0, 0, *[anchor(second_app, n) for n in range(1, 6)]]))
-                active = (service._snowluma_history_cursors if second_app == 'SnowLuma'
-                          else service._napcat_history_cursors)
-                inactive = (service._napcat_history_cursors if second_app == 'SnowLuma'
-                            else service._snowluma_history_cursors)
-                self.assertEqual(active[(id(bot), '123')], anchor(second_app, 6))
-                self.assertNotIn((id(bot), '123'), inactive)
-
     async def test_returned_cursor_cycles_and_repeats_are_bounded(self):
         for numbers in [[1, 2, 1], [1, 1]]:
             with self.subTest(numbers=numbers):
@@ -193,20 +159,21 @@ class TailCursorRegressionTests(unittest.IsolatedAsyncioTestCase):
 
                 result = await self.tail(service, bot)
 
-                self.assertEqual(result.stop_reason, 'cursor_cycle')
+                # tail 侧游标回绕现在读作「协议端没有更老的数据了」。
+                self.assertEqual(result.stop_reason, 'history_end')
                 self.assertEqual(result.pages_fetched, len(numbers))
                 self.assertEqual(bot.history_calls, history_params(
                     'SnowLuma', '123', [0, *[-number for number in numbers[:-1]]]))
 
     async def test_empty_and_missing_anchor_responses_are_bounded(self):
         missing = {'time': 90, 'message': []}
-        for app, page, reason, attempts, pages_fetched in [
+        for index, (app, page, reason, attempts, pages_fetched) in enumerate([
             ('SnowLuma', [], 'empty', 1, 1), ('NapCat', [], 'empty', 1, 1),
             ('SnowLuma', [missing], 'failures', 3, 0),
             ('NapCat', [missing], 'cursor_stuck', 1, 1),
-        ]:
+        ]):
             with self.subTest(app=app, page=page):
-                service = self.new_service(f'missing-{app}-{attempts}-{pages_fetched}')
+                service = self.new_service(f'missing-{index}-{app}')
                 self.seed(service, '123', app, [message(9, 100)])
                 bot = HistoryBot(app, {0: page})
 
@@ -215,7 +182,9 @@ class TailCursorRegressionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result.stop_reason, reason)
                 self.assertEqual(result.pages_fetched, pages_fetched)
                 self.assertEqual(bot.history_calls, history_params(app, '123', [0] * attempts))
-                self.assertFalse(service.repo.get_sync_state('123').history_exhausted)
+                # 只有 empty 是协议端明确答「再往外没有了」，其余一律不算见底。
+                self.assertEqual(service.repo.get_sync_state('123').history_exhausted,
+                                 reason == 'empty')
 
     async def test_transient_failures_do_not_poison_returned_anchors(self):
         for app in ['SnowLuma', 'NapCat']:

@@ -189,7 +189,12 @@ def _render_message(
     is_self = str(sender_id) == str(self_id) if self_id else False
     role_label = "助理" if is_self else (_sender_role_label(sender) or "群友")
 
-    body = _content_to_text(message_dict)
+    # 仓储层存的是入库时渲染好的正文（body），直接用它；只有拿到原始消息链
+    # 的调用方才现渲染。抬头一律现拼，不读库里存的任何抬头。
+    body = message_dict.get("body")
+    if not isinstance(body, str) or not body.strip():
+        body = _content_to_text(message_dict)
+    body = body.strip()
     if not body:
         return None
 

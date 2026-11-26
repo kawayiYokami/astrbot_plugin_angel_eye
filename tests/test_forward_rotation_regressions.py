@@ -4,7 +4,7 @@ import sys
 from types import ModuleType
 import tempfile
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,7 +61,12 @@ class ForwardRotationTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(service_module, "HistoryRepository", return_value=self.repo):
             self.service = service_module.QQChatHistoryService()
         self.service.self_id = "999999"
-        self.service._head_fill = AsyncMock(return_value=service_module.SyncResult("head", 0, 0, "caught_up"))
+        # 查询区间已确认覆盖：先查后补两侧都不缺，get_messages 不发同步请求，
+        # 本组用例只验转发展开的索引与预算。
+        self.cover("123")
+
+    def cover(self, group):
+        self.repo.upsert_sync_state(group, covered_from=BASE + 1, covered_to=BASE + 200)
 
     async def query(self, bot, group="123", keywords=None):
         before = len(bot.calls)
@@ -117,6 +122,7 @@ class ForwardRotationTests(unittest.IsolatedAsyncioTestCase):
     async def test_rotation_is_isolated_by_connection_and_group(self):
         for group in ("123", "456"):
             self.repo.insert_messages(group, [message(number) for number in range(1, 5)])
+            self.cover(group)
         bot = ForwardBot(failed=range(1, 5))
         other = ForwardBot(failed=range(1, 5))
 
@@ -150,7 +156,10 @@ class ForwardRotationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, ["outer", "nested-a", "nested-b"])
         self.assertEqual(first.returned_count, 1)
         self.assertNotIn("needle now expanded", first.formatted_messages[0])
-        self.assertIn("读取上限", first.formatted_messages[0])
+        # body-only 存储后，正文就是库里的真身：这轮没预算展开，正文就还是
+        # 未展开占位（旧实现是渲染期临时打上"读取上限"，那个状态没地方存）。
+        self.assertIn("尚未展开", first.formatted_messages[0])
+        self.assertIn("资源ID=waiting", first.formatted_messages[0])
 
         second, calls = await self.query(bot)
         self.assertEqual(calls, ["waiting"])
@@ -161,6 +170,7 @@ class ForwardRotationTests(unittest.IsolatedAsyncioTestCase):
         for number in range(129):
             group = str(number)
             self.repo.insert_messages(group, [message(1)])
+            self.cover(group)
             await self.query(bot, group)
         self.assertEqual(len(self.service._forward_index_rotation), 128)
         self.assertNotIn((id(bot), "0"), self.service._forward_index_rotation)

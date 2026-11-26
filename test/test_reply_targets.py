@@ -119,13 +119,15 @@ def test_cached_history_keeps_target_separate_from_earlier_motion_example(tmp_pa
         repo.insert_messages("10001", rows)
         repo.insert_messages("20002", [message(request_id, 1700000399, [reply("8888")])])
         selected = repo.query_messages("10001", 1700000000, 1700000500, None, None, 50)
-        assert selected == original
+        assert [row["message_id"] for row in selected] == [example_id, image_id, request_id]
         rendered = [format_unified_message(row) for row in selected]
         assert "https://example.com/motion.png" in rendered[0]
         assert "https://example.com/target.png" in rendered[1]
         assert "把这张图做成像上面那张动态表情一样的gif" in rendered[2]
         assert all("[回复消息ID:" not in item for item in rendered)
         assert all("[消息ID:" not in item for item in rendered)
+        # 引用段整段丢弃，不留在正文里
+        assert all("8888" not in row["body"] for row in selected)
         assert rows == original
     finally:
         repo.close()

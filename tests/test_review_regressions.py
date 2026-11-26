@@ -16,8 +16,9 @@ from astrbot.core.platform.astrbot_message import AstrBotMessage, Group, Message
 from astrbot.core.platform.platform_metadata import PlatformMetadata
 from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import AiocqhttpMessageEvent
 from _angel_eye_under_test.core.rich_message import format_rich_segment
+from _angel_eye_under_test.core.formatter import _content_to_text
 from _angel_eye_under_test.services.history_repository import HistoryRepository
-from _angel_eye_under_test.services.qq_history_service import QQChatHistoryService, HistoryQueryResult, FetchConfig, SyncResult
+from _angel_eye_under_test.services.qq_history_service import QQChatHistoryService, HistoryQueryResult, FetchConfig
 from _angel_eye_under_test.services.rich_content_service import RichContentResolver
 from _angel_eye_under_test.tools import qq_history_tool as tool_module
 
@@ -57,6 +58,7 @@ class ReviewTests(unittest.IsolatedAsyncioTestCase):
         self.service._group_locks = {}
         self.service._snowluma_history_cursors = {}
         self.service._napcat_history_cursors = {}
+        self.service._backend_is_snowluma = {}
         self.service._forward_index_rotation = {}
         self.service.rich_content_resolver = RichContentResolver()
 
@@ -66,7 +68,7 @@ class ReviewTests(unittest.IsolatedAsyncioTestCase):
                 with self.subTest(value=value, kind=kind):
                     part = {'type': kind, 'data': {'size': value}}
                     self.assertNotIn('大小：', format_rich_segment(part))
-                    self.repo._build_search_text(message(1, chain=[part]))
+                    _content_to_text(message(1, chain=[part]))
         self.assertIn('123 字节', format_rich_segment({'type': 'file', 'data': {'size': '123'}}))
 
     def test_coverage_keeps_confirmed_cursor_when_older_page_shares_second(self):
@@ -85,15 +87,13 @@ class ReviewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.pages_fetched, 6)
         self.assertFalse(self.repo.get_sync_state('123').history_exhausted)
 
-    async def test_backend_change_and_new_connection_reconfirm_cursor(self):
-        bot = Bot([[message(11)], [message(12)], [message(13)]], app='NapCat')
+    async def test_new_connection_and_cached_cursor_reconfirm_seq(self):
+        bot = Bot([[message(11)], [message(12)]], app='NapCat')
         self.service._snowluma_history_cursors[(id(bot), '123')] = -999
         await self.service._fetch_page(bot, '123', -999)
         await self.service._fetch_page(bot, '123', 11)
-        bot.app = 'SnowLuma'
-        await self.service._fetch_page(bot, '123', 12)
         calls = [params for action, params in bot.calls if action == 'get_group_msg_history']
-        self.assertEqual([calls[0]['message_seq'], calls[1]['message_seq'], calls[2]['message_id']], [0, 11, 0])
+        self.assertEqual([calls[0]['message_seq'], calls[1]['message_seq']], [0, 11])
         fresh = Bot([[message(14)]], app='NapCat')
         await self.service._fetch_page(fresh, '123', -999)
         self.assertEqual(fresh.calls[-1][1]['message_seq'], 0)
@@ -101,7 +101,8 @@ class ReviewTests(unittest.IsolatedAsyncioTestCase):
     async def test_remote_forward_body_is_indexed_before_current_keyword_filter(self):
         original = message(1, chain=[{'type': 'forward', 'data': {'id': 'synthetic'}}])
         self.repo.insert_messages('123', [original])
-        self.service._head_fill = AsyncMock(return_value=SyncResult('head', 0, 0, 'caught_up'))
+        # 该区间已确认覆盖：先查后补两侧都不缺，本用例只验转发正文索引。
+        self.repo.upsert_sync_state('123', covered_from=1700000000, covered_to=1700000000)
         bot = Bot()
         result = await self.service.get_messages(bot, '123', start_time=1700000000,
                                                  end_time=1700000000, keywords=['needle'])
@@ -114,7 +115,8 @@ class ReviewTests(unittest.IsolatedAsyncioTestCase):
     async def test_forward_index_and_display_share_three_read_budget(self):
         self.repo.insert_messages('123', [message(i, chain=[{'type': 'forward', 'data': {'id': str(i)}}])
                                            for i in range(1, 5)])
-        self.service._head_fill = AsyncMock(return_value=SyncResult('head', 0, 0, 'caught_up'))
+        # 该区间已确认覆盖：先查后补两侧都不缺，本用例只验预算分配。
+        self.repo.upsert_sync_state('123', covered_from=1700000000, covered_to=1700000000)
         bot = Bot()
         first = await self.service.get_messages(bot, '123', start_time=1700000000,
                                                 end_time=1700000000, keywords=['needle'])
