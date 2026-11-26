@@ -112,21 +112,40 @@ class QQChatHistoryService:
         rich_budget = [3]
         try:
             initial_state = self.repo.get_sync_state(group_id)
+            logger.info(
+                "AngelEye[query]: group=%s request=(%s,%s) coverage=(%s,%s) history_exhausted=%s",
+                group_id,
+                query_start,
+                query_end,
+                initial_state.covered_from,
+                initial_state.covered_to,
+                initial_state.history_exhausted,
+            )
             head_result = await self._head_fill(bot, group_id, initial_state, query_start)
             # 网络拉不动就整体失败：一次查询要么给出完整答案，要么不给答案，
             # 不允许把拉了一半的结果交出去。
             if head_result.stop_reason == "failures":
                 raise ClientError("网络通讯不佳")
             stop_reasons.append(f"head:{head_result.stop_reason}")
+            logger.info("AngelEye[query]: group=%s head_stop=%s", group_id, head_result.stop_reason)
 
             state_after_head = self.repo.update_coverage_from_messages(group_id)
             needs_tail = state_after_head.covered_from is None or query_start < state_after_head.covered_from
+            logger.info(
+                "AngelEye[query]: group=%s needs_tail=%s reason=%s",
+                group_id,
+                needs_tail,
+                "coverage_from_missing"
+                if state_after_head.covered_from is None
+                else f"request_start({query_start})vs_covered_from({state_after_head.covered_from})",
+            )
 
             if needs_tail:
                 tail_result = await self._tail_fill(bot, group_id, query_start, state_after_head)
                 if tail_result.stop_reason == "failures":
                     raise ClientError("网络通讯不佳")
                 stop_reasons.append(f"tail:{tail_result.stop_reason}")
+                logger.info("AngelEye[query]: group=%s tail_stop=%s", group_id, tail_result.stop_reason)
 
             final_state = self.repo.update_coverage_from_messages(group_id)
 
@@ -169,14 +188,18 @@ class QQChatHistoryService:
         coverage_status = self._determine_coverage_status(query_start, query_end, final_state)
 
         logger.info(
-            "AngelEye[query]: group_id=%s query_range=(%s,%s) covered_range=(%s,%s) coverage=%s result_count=%s",
+            "AngelEye[query]: group_id=%s query_range=(%s,%s) covered_range=(%s,%s) coverage=%s "
+            "hit=%s returned=%s remaining=%s stop_reasons=%s",
             group_id,
             query_start,
             query_end,
             final_state.covered_from,
             final_state.covered_to,
             coverage_status,
+            total_in_range,
             returned_count,
+            remaining_in_range,
+            ",".join(stop_reasons) or "none",
         )
 
         return HistoryQueryResult(
@@ -356,10 +379,33 @@ class QQChatHistoryService:
 
             if is_empty_cache and page_min_time <= target_start:
                 stop_reason = "target_reached"
+                logger.info(
+                    "AngelEye[head]: group=%s page=%s cursor=%s page_range=(%s,%s) inserted=%s "
+                    "target_start=%s empty_cache=True decision=stop:target_reached",
+                    group_id,
+                    pages_fetched,
+                    cursor_id,
+                    page_min_time,
+                    page_max_time,
+                    insert_result.inserted_count,
+                    target_start,
+                )
                 break
 
             if insert_result.inserted_count == 0:
+                # inserted==0 说明这一页库里已经有了，也就是追上了已存数据。
                 stop_reason = "caught_up"
+                logger.info(
+                    "AngelEye[head]: group=%s page=%s cursor=%s page_range=(%s,%s) inserted=0 "
+                    "target_start=%s empty_cache=%s decision=stop:caught_up",
+                    group_id,
+                    pages_fetched,
+                    cursor_id,
+                    page_min_time,
+                    page_max_time,
+                    target_start,
+                    is_empty_cache,
+                )
                 break
 
             next_cursor = self.repo.extract_anchor(server_messages[0])
@@ -369,15 +415,28 @@ class QQChatHistoryService:
             if pages_fetched > 1 and next_cursor == cursor_id:
                 stop_reason = "cursor_stuck"
                 break
+            logger.info(
+                "AngelEye[head]: group=%s page=%s cursor=%s page_range=(%s,%s) inserted=%s "
+                "target_start=%s decision=continue:next_cursor=%s",
+                group_id,
+                pages_fetched,
+                cursor_id,
+                page_min_time,
+                page_max_time,
+                insert_result.inserted_count,
+                target_start,
+                next_cursor,
+            )
             cursor_id = next_cursor
             await asyncio.sleep(self.config.server_call_delay)
 
         logger.info(
-            "AngelEye[sync]: group_id=%s direction=head pages=%s inserted=%s stop=%s",
+            "AngelEye[sync]: group_id=%s direction=head pages=%s inserted=%s stop=%s target_start=%s",
             group_id,
             pages_fetched,
             inserted_count,
             stop_reason,
+            target_start,
         )
         return SyncResult(
             direction="head",
@@ -445,6 +504,18 @@ class QQChatHistoryService:
             refreshed_state = self.repo.get_sync_state(group_id)
             if refreshed_state.covered_from is not None and refreshed_state.covered_from <= target_start:
                 stop_reason = "target_reached"
+                logger.info(
+                    "AngelEye[tail]: group=%s page=%s cursor=%s page_range=(%s,%s) inserted=%s "
+                    "target_start=%s covered_from=%s decision=stop:target_reached",
+                    group_id,
+                    pages_fetched,
+                    cursor_id,
+                    page_min_time,
+                    page_max_time,
+                    insert_result.inserted_count,
+                    target_start,
+                    refreshed_state.covered_from,
+                )
                 break
 
             # The requested cursor may have been replaced with 0 while the
@@ -457,6 +528,18 @@ class QQChatHistoryService:
                 stop_reason = "cursor_cycle"
                 break
             seen_cursors.add(next_cursor)
+            logger.info(
+                "AngelEye[tail]: group=%s page=%s cursor=%s page_range=(%s,%s) inserted=%s "
+                "target_start=%s decision=continue:next_cursor=%s",
+                group_id,
+                pages_fetched,
+                cursor_id,
+                page_min_time,
+                page_max_time,
+                insert_result.inserted_count,
+                target_start,
+                next_cursor,
+            )
             cursor_id = next_cursor
             await asyncio.sleep(self.config.server_call_delay)
 
