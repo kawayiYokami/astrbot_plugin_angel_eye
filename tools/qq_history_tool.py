@@ -32,8 +32,7 @@ class QQHistorySearchTool(FunctionTool):
 
     name: str = "search_qq_chat_history"
     description: str = (
-        "搜索当前群聊聊天记录。时间参数 start/end 至少精确到天（YYYY-MM-DD），"
-        "可选精确到时分秒（YYYY-MM-DD HH:mm 或 YYYY-MM-DD HH:mm:ss）。"
+        "搜索当前群聊聊天记录。时间参数使用 ISO 8601，例如 2026-11-23T00:00:00+08:00。"
         "返回真实消息ID、卡片自带文字和链接、文件及媒体资源信息；合并转发按需展开。"
         "[回复消息ID:数字]表示这条消息实际引用的目标；找被引用图片时按该ID对应原消息，"
         "不要改选最近图片。目标不在结果中时清除关键词和不适用的发送者筛选，调整时间范围与切片继续查；动作样例与待修改图片分别核对。"
@@ -44,24 +43,26 @@ class QQHistorySearchTool(FunctionTool):
             "type": "object",
             "properties": {
                 "query": {
-                    "type": ["string", "null"],
-                    "description": "关键词查询文本。为空表示不过滤关键词。",
+                    "type": "string",
+                    "description": "关键词查询文本。不传表示不过滤关键词。",
                 },
                 "start": {
-                    "type": ["string", "null"],
-                    "description": "起始时间。",
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "起始时间（含），ISO 8601，例 2026-11-23T00:00:00+08:00。不传表示不限起点。",
                 },
                 "end": {
-                    "type": ["string", "null"],
-                    "description": "结束时间（不传默认当前时间）。",
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "结束时间（含），ISO 8601，例 2026-11-26T23:59:59+08:00。不传表示到当前时间。",
                 },
                 "user_id": {
-                    "type": ["integer", "null"],
-                    "description": "按单个发送者 QQ 号过滤；null 或 0 表示不限定发送者。",
+                    "type": "integer",
+                    "description": "按单个发送者 QQ 号过滤。不传表示不限定发送者。",
                 },
                 "slice": {
-                    "type": ["string", "null"],
-                    "description": "结果切片语法：':50'(最新50条)、'50:'(最早到第50条)、'25:50'(第25到50条)、'50'(等价':50')。",
+                    "type": "string",
+                    "description": "结果切片。':50' 取最新 50 条，'50:' 取最早 50 条，'25:50' 取第 25 到 50 条，'50' 等同 ':50'。不传返回默认条数。",
                 },
             },
             "required": [],
@@ -185,11 +186,12 @@ class QQHistorySearchTool(FunctionTool):
         if not text:
             raise ValueError("时间参数不能为空字符串")
 
-        formats = ("%Y-%m-%d", "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S")
-        for fmt in formats:
-            try:
-                dt = datetime.strptime(text, fmt).replace(tzinfo=BEIJING_TZ)
-                return int(dt.timestamp())
-            except ValueError:
-                continue
-        raise ValueError("时间格式错误，支持 YYYY-MM-DD / YYYY-MM-DD HH:mm / YYYY-MM-DD HH:mm:ss")
+        try:
+            dt = datetime.fromisoformat(text)
+        except ValueError:
+            raise ValueError(
+                f"时间格式错误：{text}，请使用 ISO 8601，例如 2026-11-23T00:00:00+08:00"
+            ) from None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=BEIJING_TZ)
+        return int(dt.timestamp())

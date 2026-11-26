@@ -145,9 +145,12 @@ class HistoryParameterTests(unittest.IsolatedAsyncioTestCase):
         self.event = AiocqhttpMessageEvent('sample', message_obj,
             PlatformMetadata(name='aiocqhttp', description='offline', id='synthetic'), '10001', object())
 
-    def test_optional_schema_accepts_null(self):
-        for definition in self.tool.parameters['properties'].values():
-            self.assertIn('null', definition['type'])
+    def test_optional_schema_uses_single_type(self):
+        parameters = self.tool.parameters
+        self.assertEqual(parameters['required'], [])
+        for name, definition in parameters['properties'].items():
+            self.assertIsInstance(definition['type'], str, name)
+            self.assertNotEqual(definition['type'], 'null', name)
 
     async def test_zero_none_omitted_and_legacy_sender_filters(self):
         for value in [0, None]:
