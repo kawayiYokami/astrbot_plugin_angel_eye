@@ -34,29 +34,33 @@ class QQHistorySearchTool(FunctionTool):
     description: str = (
         "搜索当前群聊聊天记录。时间参数 start/end 至少精确到天（YYYY-MM-DD），"
         "可选精确到时分秒（YYYY-MM-DD HH:mm 或 YYYY-MM-DD HH:mm:ss）。"
+        "返回真实消息ID、卡片自带文字和链接、文件及媒体资源信息；合并转发按需展开。"
+        "[回复消息ID:数字]表示这条消息实际引用的目标；找被引用图片时按该ID对应原消息，"
+        "不要改选最近图片。目标不在结果中时清除关键词和不适用的发送者筛选，调整时间范围与切片继续查；动作样例与待修改图片分别核对。"
+        "卡片摘要不等于站外完整正文，媒体链接不表示已完成图片识别或语音转写。"
     )
     parameters: dict = field(
         default_factory=lambda: {
             "type": "object",
             "properties": {
                 "query": {
-                    "type": "string",
+                    "type": ["string", "null"],
                     "description": "关键词查询文本。为空表示不过滤关键词。",
                 },
                 "start": {
-                    "type": "string",
+                    "type": ["string", "null"],
                     "description": "起始时间。",
                 },
                 "end": {
-                    "type": "string",
+                    "type": ["string", "null"],
                     "description": "结束时间（不传默认当前时间）。",
                 },
                 "user_id": {
-                    "type": "integer",
-                    "description": "按单个发送者 QQ 号过滤。",
+                    "type": ["integer", "null"],
+                    "description": "按单个发送者 QQ 号过滤；null 或 0 表示不限定发送者。",
                 },
                 "slice": {
-                    "type": "string",
+                    "type": ["string", "null"],
                     "description": "结果切片语法：':50'(最新50条)、'50:'(最早到第50条)、'25:50'(第25到50条)、'50'(等价':50')。",
                 },
             },
@@ -104,6 +108,9 @@ class QQHistorySearchTool(FunctionTool):
             return "无法获取当前群聊信息，请检查插件配置。"
 
         try:
+            start = self._optional_text(start, "start")
+            end = self._optional_text(end, "end")
+            slice = self._optional_text(slice, "slice")
             parsed_start = self._parse_time_input(start) if start is not None else start_time
             parsed_end = self._parse_time_input(end) if end is not None else end_time
             merged_keywords = keywords
@@ -111,7 +118,10 @@ class QQHistorySearchTool(FunctionTool):
                 merged_keywords = [query] if query.strip() else None
             merged_user_ids = user_ids
             if user_id is not None:
-                merged_user_ids = [user_id]
+                if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id < 0:
+                    raise ValueError("user_id 必须为正整数 QQ 号；不限定发送者请使用 null 或 0")
+                if user_id > 0:
+                    merged_user_ids = [user_id]
 
             result = await self.history_service.get_messages(
                 bot=bot,
@@ -160,6 +170,14 @@ class QQHistorySearchTool(FunctionTool):
         if timestamp is None:
             return "未知"
         return datetime.fromtimestamp(timestamp, tz=BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
+    def _optional_text(value: Optional[str], name: str) -> Optional[str]:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError(f"{name} 必须是字符串或 null")
+        return value.strip() or None
 
     @staticmethod
     def _parse_time_input(value: str) -> int:

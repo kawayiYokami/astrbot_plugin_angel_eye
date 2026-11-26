@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, TYPE_CHECKING
 from ..core.exceptions import ResourceBusyError
 from ..core.formatter import format_unified_message
 from .history_repository import HistoryRepository, SyncState
+from .rich_content_service import RichContentResolver
 
 # 导入 logger
 try:
@@ -65,7 +66,14 @@ class QQChatHistoryService:
         self.self_id: Optional[str] = None
         self.config = FetchConfig()
         self.repo = HistoryRepository()
+        self.rich_content_resolver = RichContentResolver()
         self._group_locks: Dict[str, asyncio.Lock] = {}
+        # 仅接受当前协议端回包确认过的游标，不复用 NapCat 持久化序号。
+        self._snowluma_history_cursors: Dict[tuple[int, str], int] = {}
+        self._napcat_history_cursors: Dict[tuple[int, str], int] = {}
+        # Stable message IDs keep failed resources from monopolizing each query.
+        # Retain at most 64 IDs per scope and 128 recently used connection/groups.
+        self._forward_index_rotation: Dict[tuple[int, str], List[str]] = {}
 
     async def get_messages(
         self,
@@ -101,6 +109,7 @@ class QQChatHistoryService:
             logger.warning("AngelEye[busy]: group_id=%s 当前有同步任务进行中，直接返回忙碌。", group_id)
             raise ResourceBusyError("当前群聊历史同步忙碌中，请稍后再试。")
         stop_reasons: List[str] = []
+        rich_budget = [3]
 
         await group_lock.acquire()
         try:
@@ -116,6 +125,17 @@ class QQChatHistoryService:
                 stop_reasons.append(f"tail:{tail_result.stop_reason}")
 
             final_state = self.repo.update_coverage_from_messages(group_id)
+
+            if keywords:
+                pending = self.repo.pending_forward_messages(
+                    group_id, query_start, query_end, filter_user_ids, limit=64,
+                )
+                if pending:
+                    enriched = await self._index_pending_forwards(
+                        bot, group_id, pending, rich_budget,
+                    )
+                    self.repo.update_enriched_messages(group_id, enriched)
+                    stop_reasons.append("forward:index_bounded")
 
             local_messages = self.repo.query_messages(
                 group_id=group_id,
@@ -137,6 +157,9 @@ class QQChatHistoryService:
         finally:
             group_lock.release()
 
+        local_messages = await self.rich_content_resolver.enrich_messages(
+            bot, local_messages, scope=group_id, budget=rich_budget,
+        )
         formatted_messages = self._format_messages(local_messages)
         returned_count = len(formatted_messages)
         remaining_in_range = max(total_in_range - returned_count, 0)
@@ -166,6 +189,28 @@ class QQChatHistoryService:
             history_exhausted=final_state.history_exhausted,
             stop_reasons=stop_reasons,
         )
+
+    async def _index_pending_forwards(self, bot, group_id, pending, budget):
+        key = (id(bot), str(group_id))
+        candidates = {str(message["message_id"]): message for message in pending}
+        previous = self._forward_index_rotation.pop(key, [])
+        queue = [message_id for message_id in previous if message_id in candidates]
+        queue.extend(message_id for message_id in candidates if message_id not in queue)
+
+        enriched = []
+        attempted = 0
+        for message_id in queue[:3]:
+            if budget[0] <= 0:
+                break
+            enriched.extend(await self.rich_content_resolver.enrich_messages(
+                bot, [candidates[message_id]], scope=group_id, budget=budget,
+            ))
+            attempted += 1
+
+        self._forward_index_rotation[key] = queue[attempted:] + queue[:attempted]
+        while len(self._forward_index_rotation) > 128:
+            self._forward_index_rotation.pop(next(iter(self._forward_index_rotation)))
+        return enriched
 
     async def _initialize_self_id(self, bot: "Bot") -> str:
         try:
@@ -271,8 +316,12 @@ class QQChatHistoryService:
         stop_reason = "caught_up"
 
         is_empty_cache = state.covered_to is None or self.repo.count_messages(group_id) == 0
+        seen_cursors: set[int] = set()
 
         while True:
+            if cursor_id in seen_cursors:
+                stop_reason = "cursor_cycle"
+                break
             try:
                 server_messages = await self._fetch_page(bot, group_id, cursor_id)
                 consecutive_failures = 0
@@ -285,6 +334,7 @@ class QQChatHistoryService:
                 await asyncio.sleep(1)
                 continue
 
+            seen_cursors.add(cursor_id)
             pages_fetched += 1
             if not server_messages:
                 stop_reason = "empty"
@@ -357,8 +407,7 @@ class QQChatHistoryService:
         consecutive_failures = 0
         stop_reason = "target_reached"
 
-        no_progress_pages = 0
-        last_oldest_time = state.covered_from
+        seen_cursors: set[int] = set()
 
         while True:
             try:
@@ -395,21 +444,16 @@ class QQChatHistoryService:
                 stop_reason = "target_reached"
                 break
 
-            if insert_result.inserted_count == 0 and refreshed_state.covered_from == last_oldest_time:
-                no_progress_pages += 1
-            else:
-                no_progress_pages = 0
-                last_oldest_time = refreshed_state.covered_from
-
-            if no_progress_pages >= self.config.history_exhausted_no_progress_pages:
-                self.repo.upsert_sync_state(group_id=group_id, history_exhausted=True)
-                stop_reason = "history_exhausted"
-                break
-
+            # The requested cursor may have been replaced with 0 while the
+            # connection reestablishes its anchor. Track only returned anchors.
             next_cursor = self.repo.extract_anchor(server_messages[0])
-            if next_cursor is None or next_cursor == cursor_id:
+            if next_cursor is None:
                 stop_reason = "cursor_stuck"
                 break
+            if next_cursor in seen_cursors:
+                stop_reason = "cursor_cycle"
+                break
+            seen_cursors.add(next_cursor)
             cursor_id = next_cursor
             await asyncio.sleep(self.config.server_call_delay)
 
@@ -429,17 +473,51 @@ class QQChatHistoryService:
         )
 
     async def _fetch_page(self, bot: "Bot", group_id: str, cursor_id: int) -> List[Dict]:
+        cursor_key = (id(bot), str(group_id))
+        is_snowluma = cursor_key in self._snowluma_history_cursors
+        try:
+            version = await bot.api.call_action("get_version_info")
+            if isinstance(version, dict):
+                version = version.get("data", version)
+                if isinstance(version, dict) and version.get("app_name"):
+                    is_snowluma = "snowluma" in str(version["app_name"]).lower()
+        except Exception:
+            # 探测暂时失败时保留已识别的协议；首次失败仍沿用原 NapCat 行为。
+            pass
+
         payload = {
             "group_id": int(group_id),
-            "message_seq": int(cursor_id),
-            "reverseOrder": True,
         }
+        if is_snowluma:
+            # 存量 oldest_seq 可能属于 NapCat，必须从最新页重新取得 SnowLuma 锚点。
+            known_cursor = self._snowluma_history_cursors.get(cursor_key)
+            payload.update(
+                message_id=int(cursor_id) if cursor_id == known_cursor else 0,
+                reverse_order=True,
+            )
+        else:
+            self._snowluma_history_cursors.pop(cursor_key, None)
+            known_cursor = self._napcat_history_cursors.get(cursor_key)
+            payload.update(message_seq=int(cursor_id) if cursor_id == known_cursor else 0,
+                           reverseOrder=True)
         result = await bot.api.call_action("get_group_msg_history", **payload)
         if not result or "messages" not in result:
             raise ValueError(f"API返回无效结果: {result}")
         messages = result.get("messages", [])
         if not isinstance(messages, list):
             raise ValueError(f"API返回 messages 非列表: {type(messages)}")
+        if not is_snowluma and messages:
+            next_cursor = self.repo.extract_anchor(messages[0])
+            if next_cursor is not None:
+                self._napcat_history_cursors[cursor_key] = next_cursor
+        if is_snowluma:
+            self._napcat_history_cursors.pop(cursor_key, None)
+        if is_snowluma and messages:
+            messages = [dict(message, _history_backend="snowluma") for message in messages]
+            next_cursor = self.repo.extract_anchor(messages[0])
+            if next_cursor is None:
+                raise ValueError("SnowLuma 历史回包缺少有效 message_id 游标")
+            self._snowluma_history_cursors[cursor_key] = next_cursor
         return messages
 
     def _determine_coverage_status(self, query_start: int, query_end: int, state: SyncState) -> str:

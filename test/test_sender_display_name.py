@@ -13,8 +13,8 @@ PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 if str(PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT))
 
-from core.formatter import format_unified_message
-from services.history_repository import HistoryRepository
+from astrbot_plugin_angel_eye.core.formatter import format_unified_message
+from astrbot_plugin_angel_eye.services.history_repository import HistoryRepository
 
 GROUP_ID = "10000"
 END_TIME = 4102444800  # 2100-01-01
