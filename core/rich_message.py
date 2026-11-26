@@ -293,7 +293,7 @@ def format_rich_segment(segment, depth=0):
         duration = data.get("duration")
         if isinstance(duration, (int, float)) and not isinstance(duration, bool) and duration >= 0:
             lines.append(f"时长：{duration} 秒")
-        url = public_url(data.get("url")) or public_url(data.get("file"))
+        url = _card_url(data.get("url")) or _card_url(data.get("file"))
         if url:
             lines.append("资源链接：" + url)
         else:
@@ -315,7 +315,7 @@ def format_rich_segment(segment, depth=0):
         if value and value not in lines:
             lines.append(value)
     for key in ("url", "image", "audio", "video"):
-        value = public_url(data.get(key))
+        value = _card_url(data.get(key))
         if value:
             lines.append("资源链接：" + value)
     if lines:
