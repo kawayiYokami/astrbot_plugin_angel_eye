@@ -141,5 +141,44 @@ class ForwardTextExpandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bot.calls, ["a", "b"])
 
 
+    async def test_expand_runs_without_keywords(self):
+        """无关键词查询也要展开：正文入库后，渲染层没有消息链可以就地兜底。"""
+        self.repo.insert_messages(GROUP, [message(1, [forward("r1")])])
+        bot = ForwardBot(contents={"r1": [text("转发里的第一句")]})
+
+        result = await self.query(bot, keywords=None)
+
+        body = self.bodies()[0]
+        self.assertIn("转发里的第一句", body)
+        self.assertNotIn("尚未展开", body)
+        self.assertIn("转发里的第一句", result.formatted_messages[0])
+        self.assertEqual(bot.calls, ["r1"])
+
+    async def test_failed_child_forward_stays_retryable(self):
+        """子转发读取失败后仍留下可重试的占位，否则一次失败等于永久放弃。"""
+        self.repo.insert_messages(GROUP, [message(1, [text("外层"), forward("outer")])])
+        failing = ForwardBot(
+            contents={"outer": [text("外层正文"), forward("child")]},
+            failed=("child",),
+        )
+
+        await self.query(failing, keywords=None)
+
+        body = self.bodies()[0]
+        self.assertIn("外层正文", body)
+        self.assertIn("尚未展开（读取失败），资源ID=child", body)
+        pending = self.repo.pending_forward_rows(GROUP, 0, END_TIME, None, limit=64)
+        self.assertTrue(pending, "读取失败的子转发必须还能被挑出来重试")
+
+        healed = ForwardBot(
+            contents={
+                "outer": [text("外层正文"), forward("child")],
+                "child": [text("内层内容")],
+            }
+        )
+        await self.query(healed, keywords=None)
+        self.assertIn("内层内容", self.bodies()[0])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

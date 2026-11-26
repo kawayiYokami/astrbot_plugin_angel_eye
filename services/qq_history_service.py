@@ -137,15 +137,16 @@ class QQChatHistoryService:
 
             final_state = self.repo.get_sync_state(group_id)
 
-            if keywords:
-                pending = self.repo.pending_forward_rows(
-                    group_id, query_start, query_end, filter_user_ids, limit=64,
+            # 转发展开对所有查询生效：正文入库后，渲染层已经没有消息链可以就地展开，
+            # 占位符不在这里消掉，普通查询就只能看到一行「尚未展开」。
+            pending = self.repo.pending_forward_rows(
+                group_id, query_start, query_end, filter_user_ids, limit=64,
+            )
+            if pending:
+                await self._index_pending_forwards(
+                    bot, group_id, pending, rich_budget,
                 )
-                if pending:
-                    await self._index_pending_forwards(
-                        bot, group_id, pending, rich_budget,
-                    )
-                    stop_reasons.append("forward:index_bounded")
+                stop_reasons.append("forward:index_bounded")
 
             local_messages = self.repo.query_messages(
                 group_id=group_id,
@@ -235,8 +236,13 @@ class QQChatHistoryService:
             )
             if not block:
                 continue
-            body = body.replace(
-                f"[合并转发：尚未展开，资源ID={reference}]", block,
+            # 占位括号里可能带失败原因，按正则匹配整块；只换这一处，
+            # 新插入的转发正文不会被后续 replace 再扫一遍。
+            body = re.sub(
+                r"\[合并转发：尚未展开[^，\]\n]*，资源ID=" + re.escape(reference) + r"\]",
+                lambda _match: block,
+                body,
+                count=1,
             )
         return body
 
