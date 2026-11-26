@@ -9,6 +9,7 @@ import asyncio
 import logging
 import sqlite3
 import time
+import weakref
 from pathlib import Path
 from types import MethodType, SimpleNamespace
 from typing import Any, Dict, List, Optional
@@ -31,12 +32,12 @@ def methods(path, names):
     module = ast.Module(body=selected, type_ignores=[])
     env = dict(Any=Any, Dict=Dict, List=List, Optional=Optional, SyncState=lambda **kwargs: SimpleNamespace(**kwargs),
                SyncResult=lambda **kwargs: SimpleNamespace(**kwargs), asyncio=asyncio,
-               time=time, logger=logging.getLogger('compat-test'))
+               time=time, weakref=weakref, logger=logging.getLogger('compat-test'))
     exec(compile(module, str(path), 'exec'), env)
     return {name: env[name] for name in names}
 
 
-EM = methods(EYE, ['_fetch_page', '_tail_fill'])
+EM = methods(EYE, ['_fetch_page', '_detect_snowluma_backend', '_tail_fill'])
 ANCHOR = methods(REPO, ['extract_anchor'])['extract_anchor']
 RM = methods(REPO, ['_init_schema', 'upsert_sync_state', 'get_sync_state',
                     'update_coverage_from_messages', 'rebuild_oldest_seq_from_messages'])
@@ -69,7 +70,9 @@ class FakeBot:
 
 
 def eye_instance():
-    obj = SimpleNamespace(_snowluma_history_cursors={}, _napcat_history_cursors={}, repo=SimpleNamespace(extract_anchor=ANCHOR))
+    obj = SimpleNamespace(_snowluma_history_cursors={}, _napcat_history_cursors={},
+                          _snowluma_backends=weakref.WeakKeyDictionary(),
+                          repo=SimpleNamespace(extract_anchor=ANCHOR))
     for name, func in EM.items():
         setattr(obj, name, MethodType(func, obj))
     return obj

@@ -161,25 +161,26 @@ class TailCursorRegressionTests(unittest.IsolatedAsyncioTestCase):
                 await self.query(service, bot)
                 self.assertEqual(bot.history_calls, history_params(
                     first_app, '123', [0, 0, *[anchor(first_app, n) for n in range(1, 5)]]))
-                bot.app = second_app
-                bot.history_calls.clear()
-                bot.set_pages({0: [cached[0]], **{
-                    anchor(second_app, n): [cached[n]] for n in range(1, 4)},
+                # 换协议端就是换连接。新连接没有游标记录，两个方向都要按自己的
+                # 协议端类型重新建立锚点。
+                switched = HistoryBot(second_app, {
+                    0: [cached[0]], **{
+                        anchor(second_app, n): [cached[n]] for n in range(1, 4)},
                     anchor(second_app, 4): [message(5, 40)],
                     anchor(second_app, 5): [message(6, 5)]})
 
-                result = await self.query(service, bot, start=10)
+                result = await self.query(service, switched, start=10)
 
                 self.assertEqual(result.stop_reasons, ['head:caught_up', 'tail:target_reached'])
                 self.assertEqual(result.covered_from, 5)
-                self.assertEqual(bot.history_calls, history_params(
+                self.assertEqual(switched.history_calls, history_params(
                     second_app, '123', [0, 0, *[anchor(second_app, n) for n in range(1, 6)]]))
                 active = (service._snowluma_history_cursors if second_app == 'SnowLuma'
                           else service._napcat_history_cursors)
                 inactive = (service._napcat_history_cursors if second_app == 'SnowLuma'
                             else service._snowluma_history_cursors)
-                self.assertEqual(active[(id(bot), '123')], anchor(second_app, 6))
-                self.assertNotIn((id(bot), '123'), inactive)
+                self.assertEqual(active[(id(switched), '123')], anchor(second_app, 6))
+                self.assertNotIn((id(switched), '123'), inactive)
 
     async def test_returned_cursor_cycles_and_repeats_are_bounded(self):
         for numbers in [[1, 2, 1], [1, 1]]:

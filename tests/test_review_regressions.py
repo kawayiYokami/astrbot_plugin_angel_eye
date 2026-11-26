@@ -4,6 +4,7 @@ import sys
 from types import ModuleType, SimpleNamespace
 import tempfile
 import unittest
+import weakref
 from unittest.mock import AsyncMock, patch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -57,6 +58,7 @@ class ReviewTests(unittest.IsolatedAsyncioTestCase):
         self.service._group_locks = {}
         self.service._snowluma_history_cursors = {}
         self.service._napcat_history_cursors = {}
+        self.service._snowluma_backends = weakref.WeakKeyDictionary()
         self.service._forward_index_rotation = {}
         self.service.rich_content_resolver = RichContentResolver()
 
@@ -85,15 +87,18 @@ class ReviewTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.pages_fetched, 6)
         self.assertFalse(self.repo.get_sync_state('123').history_exhausted)
 
-    async def test_backend_change_and_new_connection_reconfirm_cursor(self):
-        bot = Bot([[message(11)], [message(12)], [message(13)]], app='NapCat')
+    async def test_new_connection_reconfirms_cursor_per_backend(self):
+        bot = Bot([[message(11)], [message(12)]], app='NapCat')
         self.service._snowluma_history_cursors[(id(bot), '123')] = -999
         await self.service._fetch_page(bot, '123', -999)
         await self.service._fetch_page(bot, '123', 11)
-        bot.app = 'SnowLuma'
-        await self.service._fetch_page(bot, '123', 12)
         calls = [params for action, params in bot.calls if action == 'get_group_msg_history']
-        self.assertEqual([calls[0]['message_seq'], calls[1]['message_seq'], calls[2]['message_id']], [0, 11, 0])
+        self.assertEqual([calls[0]['message_seq'], calls[1]['message_seq']], [0, 11])
+        # 一条连接只会是其中一种协议端，换协议端就是换连接。新连接没有游标记录，
+        # 必须从最新页重新确认，不能沿用旧连接的锚点。
+        snow = Bot([[message(13)]], app='SnowLuma')
+        await self.service._fetch_page(snow, '123', 12)
+        self.assertEqual(snow.calls[-1][1]['message_id'], 0)
         fresh = Bot([[message(14)]], app='NapCat')
         await self.service._fetch_page(fresh, '123', -999)
         self.assertEqual(fresh.calls[-1][1]['message_seq'], 0)

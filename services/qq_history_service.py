@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import weakref
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, TYPE_CHECKING
@@ -74,6 +75,28 @@ class QQChatHistoryService:
         # Stable message IDs keep failed resources from monopolizing each query.
         # Retain at most 64 IDs per scope and 128 recently used connection/groups.
         self._forward_index_rotation: Dict[tuple[int, str], List[str]] = {}
+        # 协议端类型是连接的属性，一个 bot 只会是其中一种。识别结果留在内存里，
+        # 不必每翻一页都去问一次 get_version_info。键用 bot 对象本身，随连接回收，
+        # 不会因为 id 复用串到另一条连接上。
+        self._snowluma_backends: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+    async def _detect_snowluma_backend(self, bot: "Bot") -> bool:
+        """识别协议端类型，按连接缓存。识别不出时不缓存，下次再问。"""
+        cached = self._snowluma_backends.get(bot)
+        if cached is not None:
+            return cached
+        try:
+            version = await bot.api.call_action("get_version_info")
+        except Exception:
+            # 探测暂时失败：这次判定不了，不写缓存。
+            return False
+        if isinstance(version, dict):
+            version = version.get("data", version)
+            if isinstance(version, dict) and version.get("app_name"):
+                is_snowluma = "snowluma" in str(version["app_name"]).lower()
+                self._snowluma_backends[bot] = is_snowluma
+                return is_snowluma
+        return False
 
     async def get_messages(
         self,
@@ -561,16 +584,7 @@ class QQChatHistoryService:
 
     async def _fetch_page(self, bot: "Bot", group_id: str, cursor_id: int) -> List[Dict]:
         cursor_key = (id(bot), str(group_id))
-        is_snowluma = cursor_key in self._snowluma_history_cursors
-        try:
-            version = await bot.api.call_action("get_version_info")
-            if isinstance(version, dict):
-                version = version.get("data", version)
-                if isinstance(version, dict) and version.get("app_name"):
-                    is_snowluma = "snowluma" in str(version["app_name"]).lower()
-        except Exception:
-            # 探测暂时失败时保留已识别的协议；首次失败仍沿用原 NapCat 行为。
-            pass
+        is_snowluma = await self._detect_snowluma_backend(bot)
 
         payload = {
             "group_id": int(group_id),
