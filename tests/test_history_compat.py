@@ -8,6 +8,7 @@ import ast
 import asyncio
 import logging
 import sqlite3
+import tempfile
 import time
 from pathlib import Path
 from types import MethodType, SimpleNamespace
@@ -31,7 +32,7 @@ def module_constants(path, names):
     return values
 
 
-def methods(path, names, constants=()):
+def methods(path, names, constants=(), extra=None):
     tree = ast.parse(path.read_text())
     selected = []
     for cls in tree.body:
@@ -45,6 +46,7 @@ def methods(path, names, constants=()):
                SyncResult=lambda **kwargs: SimpleNamespace(**kwargs), asyncio=asyncio,
                time=time, logger=logging.getLogger('compat-test'), sqlite3=sqlite3,
                **module_constants(path, constants))
+    env.update(extra or {})
     exec(compile(module, str(path), 'exec'), env)
     return {name: env[name] for name in names}
 
@@ -55,6 +57,12 @@ RM = methods(REPO, ['_init_schema', 'upsert_sync_state', 'get_sync_state',
                     'update_coverage_from_messages', 'rebuild_oldest_seq_from_messages'],
              constants=['SCHEMA_VERSION'])
 SCHEMA_VERSION = module_constants(REPO, ['SCHEMA_VERSION'])['SCHEMA_VERSION']
+# 走真实入口的仓储构造：__init__ 里含「版本不符就关连接、删文件、重开」，
+# 只抽 _init_schema 会整段跳过。
+GATE = methods(REPO, ['__init__', '_open', '_rebuild_if_outdated', '_init_schema'],
+               constants=['SCHEMA_VERSION'],
+               extra={'Path': Path,
+                      'StarTools': SimpleNamespace(get_data_dir=lambda _name: Path('.'))})
 
 
 class FakeBot:
@@ -209,56 +217,61 @@ class HistoryCompatibilityTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_version_guard_drops_old_schema_and_clears_coverage(self):
         """旧库（user_version=0，只有 raw_json）打开后整库清空重建。"""
-        conn = sqlite3.connect(':memory:')
-        self.addCleanup(conn.close)
-        conn.row_factory = sqlite3.Row
-        conn.executescript(
-            """
-            CREATE TABLE messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                group_id TEXT NOT NULL,
-                message_id TEXT NOT NULL,
-                message_seq INTEGER,
-                time INTEGER NOT NULL,
-                user_id TEXT,
-                nickname TEXT,
-                search_text TEXT,
-                raw_json TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                UNIQUE(group_id, message_id)
-            );
-            CREATE TABLE sync_state (
-                group_id TEXT PRIMARY KEY,
-                oldest_seq INTEGER,
-                covered_from INTEGER,
-                covered_to INTEGER,
-                history_exhausted INTEGER DEFAULT 0,
-                last_sync_at INTEGER
-            );
-            """
-        )
-        conn.execute(
-            "INSERT INTO messages (group_id,message_id,time,raw_json,created_at) "
-            "VALUES ('123','-1',100,'{}',0)"
-        )
-        conn.execute(
-            "INSERT INTO sync_state (group_id,covered_from,covered_to,history_exhausted) "
-            "VALUES ('123',100,200,0)"
-        )
-        conn.execute('PRAGMA user_version = 0')
-        conn.commit()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'legacy.db'
+            conn = sqlite3.connect(path)
+            conn.executescript(
+                """
+                CREATE TABLE messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    group_id TEXT NOT NULL,
+                    message_id TEXT NOT NULL,
+                    message_seq INTEGER,
+                    time INTEGER NOT NULL,
+                    user_id TEXT,
+                    nickname TEXT,
+                    search_text TEXT,
+                    raw_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    UNIQUE(group_id, message_id)
+                );
+                CREATE TABLE sync_state (
+                    group_id TEXT PRIMARY KEY,
+                    oldest_seq INTEGER,
+                    covered_from INTEGER,
+                    covered_to INTEGER,
+                    history_exhausted INTEGER DEFAULT 0,
+                    last_sync_at INTEGER
+                );
+                """
+            )
+            conn.execute(
+                "INSERT INTO messages (group_id,message_id,time,raw_json,created_at) "
+                "VALUES ('123','-1',100,'{}',0)"
+            )
+            conn.execute(
+                "INSERT INTO sync_state (group_id,covered_from,covered_to,history_exhausted) "
+                "VALUES ('123',100,200,0)"
+            )
+            conn.execute('PRAGMA user_version = 0')
+            conn.commit()
+            conn.close()
+            self.assertTrue(path.exists())
 
-        repo = SimpleNamespace(_conn=conn)
-        for name, func in RM.items():
-            setattr(repo, name, MethodType(func, repo))
-        repo._init_schema()
+            # 走真实入口：重建发生在 __init__ 里，不在这里手动调 _init_schema，
+            # 否则测不到「关闭连接 + 删文件 + 重开」这一段。
+            repo = SimpleNamespace(db_path=path)
+            for name, func in GATE.items():
+                setattr(repo, name, MethodType(func, repo))
+            repo.__init__(path)
+            self.addCleanup(repo._conn.close)
 
-        columns = {row['name'] for row in conn.execute('PRAGMA table_info(messages)')}
-        self.assertEqual(columns, {'group_id', 'message_id', 'message_seq', 'time', 'sender_id', 'body'})
-        self.assertEqual(conn.execute('SELECT COUNT(1) FROM messages').fetchone()[0], 0)
-        # 覆盖区间必须一起清：留着它等于凭空声称"这段查过"
-        self.assertEqual(conn.execute('SELECT COUNT(1) FROM sync_state').fetchone()[0], 0)
-        self.assertEqual(conn.execute('PRAGMA user_version').fetchone()[0], SCHEMA_VERSION)
+            columns = {row['name'] for row in repo._conn.execute('PRAGMA table_info(messages)')}
+            self.assertEqual(columns, {'group_id', 'message_id', 'message_seq', 'time', 'sender_id', 'body'})
+            self.assertEqual(repo._conn.execute('SELECT COUNT(1) FROM messages').fetchone()[0], 0)
+            # 覆盖区间必须一起清：留着它等于凭空声称"这段查过"
+            self.assertEqual(repo._conn.execute('SELECT COUNT(1) FROM sync_state').fetchone()[0], 0)
+            self.assertEqual(repo._conn.execute('PRAGMA user_version').fetchone()[0], SCHEMA_VERSION)
 
 
 if __name__ == '__main__':

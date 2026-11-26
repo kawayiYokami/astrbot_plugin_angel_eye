@@ -57,28 +57,38 @@ class HistoryRepository:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # 保持 SQLite 默认线程约束：连接仅可在创建它的线程中使用。
         # 本插件按单进程 + 单事件循环线程模型运行，不支持多线程共享连接。
-        self._conn = sqlite3.connect(self.db_path)
-        self._conn.row_factory = sqlite3.Row
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn = self._open()
+        self._rebuild_if_outdated()
         self._init_schema()
 
-    def _init_schema(self) -> None:
+    def _open(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        return conn
+
+    def _rebuild_if_outdated(self) -> None:
+        """表结构版本不一致时整库重来，直接删文件重建。
+
+        不走 DROP + VACUUM：VACUUM 要把整个文件重写一遍，实测 411MB 的库
+        阻塞插件加载 147 秒；而且结果落在 WAL 里，主库文件在 checkpoint 前
+        不缩小，WAL 还会再涨一份，合计反而比原来翻倍。删文件是瞬时的，体积
+        也从零开始。
+        """
         version = self._conn.execute("PRAGMA user_version").fetchone()[0]
-        if version != SCHEMA_VERSION:
-            # sync_state 必须一起清。只清消息却留着覆盖区间，库会凭空声称
-            # "这段我查过"，查询零网络返回空结果——比没数据更糟。
-            self._conn.executescript(
-                "DROP TABLE IF EXISTS messages;"
-                "DROP TABLE IF EXISTS senders;"
-                "DROP TABLE IF EXISTS sync_state;"
-            )
-            # DROP 只把页还给 freelist，文件本身不缩小：不 VACUUM 的话旧库
-            # 那几百 MB 会一直占着，体积目标永远达不到。这是一次性代价。
-            try:
-                self._conn.execute("VACUUM")
-            except sqlite3.Error:
-                logger.warning("AngelEye: 清理旧库后 VACUUM 失败，文件体积暂不回收")
+        if version == SCHEMA_VERSION:
+            return
+        # sync_state 必须一起清。只清消息却留着覆盖区间，库会凭空声称
+        # "这段我查过"，查询零网络返回空结果——比没数据更糟。
+        self._conn.close()
+        for suffix in ("", "-wal", "-shm"):
+            candidate = Path(str(self.db_path) + suffix)
+            if candidate.exists():
+                candidate.unlink()
+        self._conn = self._open()
+
+    def _init_schema(self) -> None:
         self._conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS messages (
