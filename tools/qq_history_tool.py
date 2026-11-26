@@ -12,7 +12,7 @@ from typing import List, Optional
 from astrbot.api import FunctionTool
 from astrbot.api.event import AstrMessageEvent
 
-from ..core.exceptions import ResourceBusyError
+from ..core.exceptions import ClientError, ResourceBusyError
 from ..services.qq_history_service import HistoryQueryResult, QQChatHistoryService
 
 # 导入 logger
@@ -133,6 +133,9 @@ class QQHistorySearchTool(FunctionTool):
                 limit=limit,
                 slice_expr=slice,
             )
+        except ClientError:
+            # 网络重试到上限仍失败：整体失败，不给半份结果。
+            return "网络通讯不佳，请稍后再试。"
         except ResourceBusyError as exc:
             return str(exc)
         except ValueError as exc:

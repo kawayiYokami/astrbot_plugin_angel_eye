@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, TYPE_CHECKING
 
-from ..core.exceptions import ResourceBusyError
+from ..core.exceptions import ClientError
 from ..core.formatter import format_message_blocks
 from .history_repository import HistoryRepository, SyncState
 from .rich_content_service import RichContentResolver
@@ -105,16 +105,18 @@ class QQChatHistoryService:
             group_lock = asyncio.Lock()
             self._group_locks[group_id] = group_lock
 
-        if group_lock.locked():
-            logger.warning("AngelEye[busy]: group_id=%s 当前有同步任务进行中，直接返回忙碌。", group_id)
-            raise ResourceBusyError("当前群聊历史同步忙碌中，请稍后再试。")
+        # 锁是用来排队的，不是用来拒绝的：并发进来的查询等前一个做完再继续，
+        # 绝不因为锁被占用就失败。
+        await group_lock.acquire()
         stop_reasons: List[str] = []
         rich_budget = [3]
-
-        await group_lock.acquire()
         try:
             initial_state = self.repo.get_sync_state(group_id)
             head_result = await self._head_fill(bot, group_id, initial_state, query_start)
+            # 网络拉不动就整体失败：一次查询要么给出完整答案，要么不给答案，
+            # 不允许把拉了一半的结果交出去。
+            if head_result.stop_reason == "failures":
+                raise ClientError("网络通讯不佳")
             stop_reasons.append(f"head:{head_result.stop_reason}")
 
             state_after_head = self.repo.update_coverage_from_messages(group_id)
@@ -122,6 +124,8 @@ class QQChatHistoryService:
 
             if needs_tail:
                 tail_result = await self._tail_fill(bot, group_id, query_start, state_after_head)
+                if tail_result.stop_reason == "failures":
+                    raise ClientError("网络通讯不佳")
                 stop_reasons.append(f"tail:{tail_result.stop_reason}")
 
             final_state = self.repo.update_coverage_from_messages(group_id)
