@@ -149,16 +149,17 @@ class QQChatHistoryService:
 
             final_state = self.repo.update_coverage_from_messages(group_id)
 
-            if keywords:
-                pending = self.repo.pending_forward_messages(
-                    group_id, query_start, query_end, filter_user_ids, limit=64,
+            # 转发展开对所有查询生效：渲染层只看得到已入库的内容，不在这里
+            # 补上，普通查询就只能看到一行「尚未展开」。
+            pending = self.repo.pending_forward_messages(
+                group_id, query_start, query_end, filter_user_ids, limit=64,
+            )
+            if pending:
+                enriched = await self._index_pending_forwards(
+                    bot, group_id, pending, rich_budget,
                 )
-                if pending:
-                    enriched = await self._index_pending_forwards(
-                        bot, group_id, pending, rich_budget,
-                    )
-                    self.repo.update_enriched_messages(group_id, enriched)
-                    stop_reasons.append("forward:index_bounded")
+                self.repo.update_enriched_messages(group_id, enriched)
+                stop_reasons.append("forward:index_bounded")
 
             local_messages = self.repo.query_messages(
                 group_id=group_id,
