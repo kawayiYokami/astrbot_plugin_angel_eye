@@ -148,24 +148,36 @@ class QQHistorySearchTool(FunctionTool):
         return self._render_result(result)
 
     def _render_result(self, result: HistoryQueryResult) -> str:
-        coverage_line = (
-            f"覆盖状态: {result.coverage_status} | 历史到底: {str(result.history_exhausted).lower()} | "
-            f"同步停止: {', '.join(result.stop_reasons)}"
+        """回执只写调用方需要判断的东西：查到了什么、结果全不全、还要不要继续。
+
+        内部状态（覆盖标记、游标停止原因、本地覆盖边界）不进回执——模型据此
+        做不了任何决定，只会占掉本该给消息正文的位置。
+        """
+        range_text = (
+            f"{self._fmt_ts(result.query_start)} ~ {self._fmt_ts(result.query_end)}"
         )
-        count_line = (
-            f"区间命中总数: {result.total_in_range} | 已返回: {result.returned_count} | "
-            f"区间内未返回: {result.remaining_in_range}"
-        )
-        range_line = (
-            f"查询区间: {self._fmt_ts(result.query_start)} ~ {self._fmt_ts(result.query_end)}\n"
-            f"本地覆盖: {self._fmt_ts(result.covered_from)} ~ {self._fmt_ts(result.covered_to)}"
-        )
+        incomplete = result.coverage_status != "FULL"
 
         if not result.formatted_messages:
-            return f"在指定条件下没有匹配消息。\n{coverage_line}\n{count_line}\n{range_line}"
+            lines = [f"在 {range_text} 内没有匹配消息。"]
+            if incomplete:
+                lines.append("这段历史本地尚未完全同步，没有消息也可能是还没拉到。")
+            return "\n".join(lines)
 
-        messages_body = "\n\n".join(result.formatted_messages)
-        return f"{coverage_line}\n{count_line}\n{range_line}\n\n{messages_body}"
+        lines = [
+            f"在 {range_text} 内命中 {result.total_in_range} 条，本次返回 "
+            f"{result.returned_count} 条。"
+        ]
+        if result.remaining_in_range:
+            lines.append(
+                f"还有 {result.remaining_in_range} 条未返回："
+                "缩小时间范围或加大 count 再查。"
+            )
+        if incomplete:
+            lines.append("这段历史本地尚未完全同步，结果可能不全。")
+        lines.append("")
+        lines.append("\n\n".join(result.formatted_messages))
+        return "\n".join(lines)
 
     @staticmethod
     def _fmt_ts(timestamp: Optional[int]) -> str:
