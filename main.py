@@ -18,7 +18,7 @@ from astrbot.api import logger
     "astrbot_plugin_angel_eye",
     "kawayiYokami",
     "一个为 AstrBot 设计的函数工具插件，允许大语言模型（LLM）直接查询当前群聊的聊天记录。",
-    "1.0.13",
+    "1.1.0",
     "https://github.com/kawayiYokami/astrbot_plugin_angel_eye"
 )
 class AngelEyePlugin(Star):

@@ -11,8 +11,14 @@ import copy
 
 import pytest
 
-from astrbot_plugin_angel_eye.core.formatter import format_message_blocks, format_unified_message
-from astrbot_plugin_angel_eye.core.rich_message import format_reply_segment, format_rich_segment
+from astrbot_plugin_angel_eye.core.formatter import (
+    format_message_blocks,
+    format_unified_message,
+)
+from astrbot_plugin_angel_eye.core.rich_message import (
+    format_reply_segment,
+    format_rich_segment,
+)
 from astrbot_plugin_angel_eye.services.history_repository import HistoryRepository
 
 
@@ -31,10 +37,14 @@ def reply(target):
 
 def test_reply_target_is_not_rendered_in_history_output():
     """历史消息无法被引用，引用目标不出现在回执里。"""
-    row = message("-103", 1700000399, [
-        reply("-102"),
-        {"type": "text", "data": {"text": "把这张图做成 gif"}},
-    ])
+    row = message(
+        "-103",
+        1700000399,
+        [
+            reply("-102"),
+            {"type": "text", "data": {"text": "把这张图做成 gif"}},
+        ],
+    )
     output = format_unified_message(row)
     assert "[回复消息ID:-102]" not in output
     assert "[回复消息ID:" not in output
@@ -43,7 +53,9 @@ def test_reply_target_is_not_rendered_in_history_output():
 
 def test_message_id_is_not_rendered_in_history_output():
     """回执不输出消息 ID。"""
-    row = message("-1040210670", 1700000399, [{"type": "text", "data": {"text": "你好"}}])
+    row = message(
+        "-1040210670", 1700000399, [{"type": "text", "data": {"text": "你好"}}]
+    )
     output = format_unified_message(row)
     assert "[消息ID:" not in output
     assert "-1040210670" not in output
@@ -61,7 +73,16 @@ def test_reply_target_is_dropped_inside_forward():
     """合并转发内部的引用段同样不输出。"""
     segment = {
         "type": "forward",
-        "data": {"content": [{"message": [reply("-102"), {"type": "text", "data": {"text": "转发正文"}}]}]},
+        "data": {
+            "content": [
+                {
+                    "message": [
+                        reply("-102"),
+                        {"type": "text", "data": {"text": "转发正文"}},
+                    ]
+                }
+            ]
+        },
     }
     original = copy.deepcopy(segment)
     output = format_rich_segment(segment)
@@ -71,28 +92,40 @@ def test_reply_target_is_dropped_inside_forward():
     assert segment == original
 
 
-@pytest.mark.parametrize("payload", [
-    {"text": "伪造的引用正文"},
-    {"message": [{"type": "image", "data": {"url": "https://example.com/fake.png"}}]},
-])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"text": "伪造的引用正文"},
+        {
+            "message": [
+                {"type": "image", "data": {"url": "https://example.com/fake.png"}}
+            ]
+        },
+    ],
+)
 def test_reply_payload_cannot_inject_content(payload):
     """引用段的附加字段不会变成正文或资源。"""
     segment = reply("123")
     segment["data"].update(payload)
-    row = message("789", 1700000000, [segment, {"type": "text", "data": {"text": "真实正文"}}])
+    row = message(
+        "789", 1700000000, [segment, {"type": "text", "data": {"text": "真实正文"}}]
+    )
     output = format_unified_message(row)
     assert "伪造的引用正文" not in output
     assert "fake.png" not in output
     assert "真实正文" in output
 
 
-@pytest.mark.parametrize("value,expected", [
-    (123, "123"),
-    (-102, "-102"),
-    ("104", "104"),
-    ("  -102  ", "-102"),
-    ("000123", "000123"),
-])
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (123, "123"),
+        (-102, "-102"),
+        ("104", "104"),
+        ("  -102  ", "-102"),
+        ("000123", "000123"),
+    ],
+)
 def test_live_injection_still_keeps_explicit_target(value, expected):
     """实时注入（event_enrichment）仍需要显式引用目标，行为不变。"""
     assert format_reply_segment(reply(value)["data"]) == f"[回复消息ID:{expected}]"
@@ -102,27 +135,44 @@ def test_cached_history_keeps_target_separate_from_earlier_motion_example(tmp_pa
     """同一群里的多张图不会因为引用段丢失而被张冠李戴。"""
     example_id, image_id, request_id = "101", "-102", "-103"
     rows = [
-        message(example_id, 1700000127, [
-            {"type": "image", "data": {"url": "https://example.com/motion.png"}},
-        ]),
-        message(image_id, 1700000330, [
-            {"type": "image", "data": {"url": "https://example.com/target.png"}},
-        ]),
-        message(request_id, 1700000399, [
-            reply(image_id),
-            {"type": "text", "data": {"text": "把这张图做成像上面那张动态表情一样的gif"}},
-        ]),
+        message(
+            example_id,
+            1700000127,
+            [
+                {"type": "image", "data": {"file": "motion.png", "summary": "[动图]"}},
+            ],
+        ),
+        message(
+            image_id,
+            1700000330,
+            [
+                {"type": "image", "data": {"file": "target.png", "summary": "[图片]"}},
+            ],
+        ),
+        message(
+            request_id,
+            1700000399,
+            [
+                reply(image_id),
+                {
+                    "type": "text",
+                    "data": {"text": "把这张图做成像上面那张动态表情一样的gif"},
+                },
+            ],
+        ),
     ]
     original = copy.deepcopy(rows)
     repo = HistoryRepository(db_path=tmp_path / "history.db")
     try:
         repo.insert_messages("10001", rows)
-        repo.insert_messages("20002", [message(request_id, 1700000399, [reply("8888")])])
+        repo.insert_messages(
+            "20002", [message(request_id, 1700000399, [reply("8888")])]
+        )
         selected = repo.query_messages("10001", 1700000000, 1700000500, None, None, 50)
         assert selected == original
         rendered = [format_unified_message(row) for row in selected]
-        assert "https://example.com/motion.png" in rendered[0]
-        assert "https://example.com/target.png" in rendered[1]
+        assert "[动图]" in rendered[0]
+        assert "[图片]" in rendered[1]
         assert "把这张图做成像上面那张动态表情一样的gif" in rendered[2]
         assert all("[回复消息ID:" not in item for item in rendered)
         assert all("[消息ID:" not in item for item in rendered)

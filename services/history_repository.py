@@ -11,9 +11,14 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
+from urllib.parse import parse_qs, urlsplit
 
 from astrbot.core.star.star_tools import StarTools
 from ..core.rich_message import extract_rich_segments
+from ..migrations import run_migrations
+
+# 媒体段：url 换成 fileid，其余字段保留（summary/file/file_size 是内容线索）
+MEDIA_SEGMENT_TYPES = frozenset({"image", "video", "record", "file"})
 
 
 @dataclass
@@ -36,7 +41,9 @@ class HistoryRepository:
     """QQ 历史消息 SQLite 仓储。"""
 
     def __init__(self, db_path: Optional[Path] = None):
-        default_path = StarTools.get_data_dir("astrbot_plugin_angel_eye") / "qq_history_cache.db"
+        default_path = (
+            StarTools.get_data_dir("astrbot_plugin_angel_eye") / "qq_history_cache.db"
+        )
         self.db_path = db_path or default_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         # 保持 SQLite 默认线程约束：连接仅可在创建它的线程中使用。
@@ -46,6 +53,9 @@ class HistoryRepository:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=NORMAL")
         self._init_schema()
+        # 旧库在这里一次性升到当前结构版本。迁移不允许失败，坏数据跳过，
+        # 版本照样推进，所以不需要任何返回值判断。
+        run_migrations(self._conn, self.db_path)
 
     def _init_schema(self) -> None:
         self._conn.executescript(
@@ -78,6 +88,21 @@ class HistoryRepository:
 
             CREATE INDEX IF NOT EXISTS idx_messages_group_user_time
             ON messages(group_id, user_id, time);
+
+            CREATE TABLE IF NOT EXISTS group_names (
+                group_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS user_names (
+                group_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                nickname TEXT NOT NULL DEFAULT '',
+                card TEXT NOT NULL DEFAULT '',
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (group_id, user_id)
+            );
             """
         )
         self._conn.commit()
@@ -186,17 +211,24 @@ class HistoryRepository:
             self.upsert_sync_state(
                 group_id=group_id,
                 # Keep a confirmed page boundary when older pages share a second.
-                oldest_seq=(self.rebuild_oldest_seq_from_messages(group_id)
-                            if state.oldest_seq is None or cursor_time != min_time
-                            else None),
+                oldest_seq=(
+                    self.rebuild_oldest_seq_from_messages(group_id)
+                    if state.oldest_seq is None or cursor_time != min_time
+                    else None
+                ),
                 covered_from=min_time,
                 covered_to=max_time,
             )
 
         return self.get_sync_state(group_id)
 
-    def insert_messages(self, group_id: str, messages: Iterable[Dict[str, Any]]) -> InsertResult:
+    def insert_messages(
+        self, group_id: str, messages: Iterable[Dict[str, Any]]
+    ) -> InsertResult:
         payloads: List[tuple] = []
+        group_rows: Dict[str, str] = {}
+        name_rows: Dict[tuple, tuple] = {}
+        now = int(time.time())
         page_oldest_anchor: Optional[int] = None
 
         message_list = list(messages)
@@ -218,6 +250,15 @@ class HistoryRepository:
             message_seq = self._extract_anchor(msg)
             search_text = self._build_search_text(msg)
 
+            group_name = str(msg.get("group_name") or "").strip()
+            if group_name:
+                group_rows[group_id] = group_name
+            if user_id:
+                nick = str(sender.get("nickname") or "")
+                card = str(sender.get("card") or "")
+                if nick or card:
+                    name_rows[(group_id, user_id)] = (nick, card)
+
             payloads.append(
                 (
                     group_id,
@@ -227,8 +268,8 @@ class HistoryRepository:
                     user_id,
                     nickname,
                     search_text,
-                    json.dumps(msg, ensure_ascii=False),
-                    int(time.time()),
+                    json.dumps(self._slim_message(msg), ensure_ascii=False),
+                    now,
                 )
             )
 
@@ -252,14 +293,43 @@ class HistoryRepository:
             """,
             payloads,
         )
-        self._conn.commit()
         inserted_count = self._conn.total_changes - before_changes
-        return InsertResult(inserted_count=inserted_count, page_oldest_anchor=page_oldest_anchor)
+        if group_rows:
+            self._conn.executemany(
+                "INSERT INTO group_names (group_id, name, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(group_id) DO UPDATE SET "
+                "name = excluded.name, updated_at = excluded.updated_at",
+                [(gid, name, now) for gid, name in group_rows.items()],
+            )
+        if name_rows:
+            self._conn.executemany(
+                "INSERT INTO user_names (group_id, user_id, nickname, card, updated_at) "
+                "VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(group_id, user_id) DO UPDATE SET "
+                "nickname = CASE WHEN excluded.nickname <> '' "
+                "THEN excluded.nickname ELSE nickname END, "
+                "card = CASE WHEN excluded.card <> '' THEN excluded.card ELSE card END, "
+                "updated_at = excluded.updated_at",
+                [
+                    (gid, uid, nick, card, now)
+                    for (gid, uid), (nick, card) in name_rows.items()
+                ],
+            )
+        self._conn.commit()
+        return InsertResult(
+            inserted_count=inserted_count, page_oldest_anchor=page_oldest_anchor
+        )
 
-    def pending_forward_messages(self, group_id, start_time, end_time, user_ids, limit=4):
+    def pending_forward_messages(
+        self, group_id, start_time, end_time, user_ids, limit=4
+    ):
         """Find a bounded set of unresolved forward resources in the query scope."""
         where_sql, params = self._build_filter_where_clause(
-            group_id, start_time, end_time, None, user_ids,
+            group_id,
+            start_time,
+            end_time,
+            None,
+            user_ids,
         )
         rows = self._conn.execute(
             f"SELECT raw_json FROM messages WHERE {where_sql} AND raw_json LIKE ? "
@@ -271,7 +341,8 @@ class HistoryRepository:
             message = json.loads(row["raw_json"])
             chain = message.get("message", [])
             if isinstance(chain, list) and any(
-                isinstance(part, dict) and part.get("type") == "forward"
+                isinstance(part, dict)
+                and part.get("type") == "forward"
                 and isinstance(part.get("data"), dict)
                 and not part["data"].get("content")
                 and part["data"].get("id", part["data"].get("message_id")) is not None
@@ -280,15 +351,22 @@ class HistoryRepository:
                 result.append(message)
                 if len(result) >= limit:
                     break
-        return result
+        return self._hydrate(result, group_id)
 
     def update_enriched_messages(self, group_id, messages):
         """Persist bounded forward content and rebuild its search text in place."""
         self._conn.executemany(
             "UPDATE messages SET search_text = ?, raw_json = ? "
             "WHERE group_id = ? AND message_id = ?",
-            [(self._build_search_text(message), json.dumps(message, ensure_ascii=False),
-              group_id, str(message.get("message_id", ""))) for message in messages],
+            [
+                (
+                    self._build_search_text(message),
+                    json.dumps(self._slim_message(message), ensure_ascii=False),
+                    group_id,
+                    str(message.get("message_id", "")),
+                )
+                for message in messages
+            ],
         )
         self._conn.commit()
 
@@ -343,7 +421,7 @@ class HistoryRepository:
                 result.append(json.loads(row["raw_json"]))
             except json.JSONDecodeError:
                 continue
-        return result
+        return self._hydrate(result, group_id)
 
     def count_messages_in_range(
         self,
@@ -403,7 +481,11 @@ class HistoryRepository:
 
     @staticmethod
     def extract_anchor(msg: Dict[str, Any]) -> Optional[int]:
-        seq = msg.get("message_id") if msg.get("_history_backend") == "snowluma" else msg.get("message_seq")
+        seq = (
+            msg.get("message_id")
+            if msg.get("_history_backend") == "snowluma"
+            else msg.get("message_seq")
+        )
         if seq is None:
             seq = msg.get("message_id")
         try:
@@ -418,6 +500,56 @@ class HistoryRepository:
     @staticmethod
     def _escape_like_pattern(value: str) -> str:
         return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    @staticmethod
+    def _fileid_from_url(url: Any) -> str:
+        """媒体段的 url 是带签名参数的临时链接，只保留其中的 fileid。"""
+        if not isinstance(url, str) or not url:
+            return ""
+        try:
+            values = parse_qs(urlsplit(url).query).get("fileid") or []
+        except ValueError:
+            return ""
+        return values[0] if values else ""
+
+    @classmethod
+    def _slim_segment(cls, segment: Any) -> Any:
+        if not isinstance(segment, dict) or not isinstance(segment.get("data"), dict):
+            return segment
+        info = dict(segment["data"])
+        if "url" not in info:
+            return segment
+        url = info.pop("url", None)
+        if url:
+            fileid = cls._fileid_from_url(url)
+            if fileid:
+                info.setdefault("fileid", fileid)
+        slim = dict(segment)
+        slim["data"] = info
+        return slim
+
+    @classmethod
+    def _slim_message(cls, msg: Dict[str, Any]) -> Dict[str, Any]:
+        """落到 raw_json 的形态：去掉逐条重复的字段，媒体 url 换成 fileid。
+
+        名字（group_name / sender.nickname / sender.card）不在这里留，
+        由 group_names、user_names 两张表承担，读取时回填。
+        """
+        slim = dict(msg)
+        for key in ("raw_message", "font", "real_id", "anonymous", "group_name"):
+            slim.pop(key, None)
+
+        sender = slim.get("sender")
+        if isinstance(sender, dict):
+            sender = dict(sender)
+            for key in ("sex", "age", "nickname", "card"):
+                sender.pop(key, None)
+            slim["sender"] = sender
+
+        chain = slim.get("message")
+        if isinstance(chain, list):
+            slim["message"] = [cls._slim_segment(segment) for segment in chain]
+        return slim
 
     @staticmethod
     def _build_search_text(msg: Dict[str, Any]) -> str:
@@ -445,6 +577,39 @@ class HistoryRepository:
             text_parts.append(str(user_id))
 
         return " ".join(text_parts)
+
+    def _hydrate(
+        self, messages: List[Dict[str, Any]], fallback_group_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """把名字表里的群名与昵称补回消息，raw_json 不再自带这些字段。"""
+        if not messages:
+            return messages
+        group_names = {
+            str(row[0]): row[1]
+            for row in self._conn.execute("SELECT group_id, name FROM group_names")
+        }
+        user_names = {
+            (str(row[0]), str(row[1])): (row[2] or "", row[3] or "")
+            for row in self._conn.execute(
+                "SELECT group_id, user_id, nickname, card FROM user_names"
+            )
+        }
+        for message in messages:
+            gid = str(message.get("group_id") or fallback_group_id or "")
+            if gid in group_names:
+                message["group_name"] = group_names[gid]
+            sender = message.get("sender")
+            if not isinstance(sender, dict):
+                continue
+            uid = str(sender.get("user_id") or "")
+            pair = user_names.get((gid, uid))
+            if pair is None:
+                continue
+            nickname, card = pair
+            sender["nickname"] = nickname
+            if card:
+                sender["card"] = card
+        return messages
 
     def _build_filter_where_clause(
         self,

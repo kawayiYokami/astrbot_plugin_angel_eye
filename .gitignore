@@ -6,6 +6,7 @@ __pycache__/
 *.pyd
 .pytest_cache
 angel_eye_cache/
+data/
 # IDE / Editor
 .idea/
 .vscode/
